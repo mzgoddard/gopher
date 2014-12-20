@@ -114,13 +114,23 @@ func TestParseAllTokens(t *testing.T) {
 	if matchCodes(ParseAllTokens("type Number object {}"), tokens) {
 		t.Errorf("type Number object {} == %s", codesAsNames(tokens))
 	}
+
+	// tokens = []TokenCode {
+	// 	TOKEN_FUNC, TOKEN_WS, TOKEN_NAME, TOKEN_PARAN_BEGIN, TOKEN_PARAN_END,
+	// 	TOKEN_WS, TOKEN_CURLY_BEGIN, TOKEN_CURLY_END,
+	// }
+	// if matchCodes(ParseAllTokens("func name() {}"), tokens) {
+	// 	t.Errorf("func name() {} == %s", codesAsNames(tokens))
+	// }
 }
 
 func matchCodes(l *list.List, tokens []TokenCode) bool {
 	i := 0
 	for e := l.Front(); e != nil; e = e.Next() {
 		token, ok := e.Value.(*Token)
-		if ok && token.code != tokens[i] {
+		if ok && (
+			i < len(tokens) && token.code != tokens[i] ||
+			token.code == TOKEN_EOF) {
 			return false
 		}
 		i++
@@ -137,4 +147,20 @@ func codesAsNames(tokens []TokenCode) string {
 		}
 	}
 	return s
+}
+
+func tokensCodeArray(tokens *list.List) []TokenCode {
+	ary := make([]TokenCode, tokens.Len())
+	i := 0
+	for e := tokens.Front(); e != nil; e = e.Next() {
+		if tokenCode, ok := e.Value.(TokenCode); ok {
+			ary[i] = tokenCode
+		} else if tokenCode, ok := e.Value.(int); ok {
+			ary[i] = TokenCode(tokenCode)
+		} else if token, ok := e.Value.(*Token); ok {
+			ary[i] = token.code
+		}
+		i++
+	}
+	return ary
 }

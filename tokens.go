@@ -30,6 +30,8 @@ const (
 	TOKEN_NOT
 	TOKEN_CAROT
 	TOKEN_DOT
+	TOKEN_COMMA
+	TOKEN_COLON
 	TOKEN_PARAN_BEGIN
 	TOKEN_PARAN_END
 	TOKEN_CURLY_BEGIN
@@ -112,7 +114,7 @@ func (self *Lexer) matchWord(token *Token, word string, code TokenCode) bool {
 		}
 	}
 	if wordIndex == len(word) {
-		token.length = wordIndex - 1
+		token.length = wordIndex
 		self.column += token.length
 		self.index = index
 		token.code = code
@@ -285,6 +287,10 @@ func (self *Lexer) ParseToken() Token {
 		return token
 	} else if self.matchChar(&token, '.', TOKEN_DOT) {
 		return token
+	} else if self.matchChar(&token, ',', TOKEN_COMMA) {
+		return token
+	} else if self.matchChar(&token, ':', TOKEN_COLON) {
+		return token
 	} else if self.matchChar(&token, '{', TOKEN_CURLY_BEGIN) {
 		return token
 	} else if self.matchChar(&token, '}', TOKEN_CURLY_END) {
@@ -334,11 +340,15 @@ func (self *Lexer) ParseAllTokens() *list.List {
 	list := list.New()
 	token := self.ParseToken()
 	for token.code != TOKEN_NONE && token.code != TOKEN_EOF {
-		list.PushBack(&token)
+		tokenP := new(Token)
+		*tokenP = token
+		list.PushBack(tokenP)
 		token = self.ParseToken()
 	}
 	if token.code == TOKEN_EOF {
-		list.PushBack(&token)
+		tokenP := new(Token)
+		*tokenP = token
+		list.PushBack(tokenP)
 	}
 	return list
 }
@@ -373,12 +383,16 @@ func (self TokenCode) Name() string {
 		return "WS"
 	} else if self == TOKEN_EOF {
 		return "EOF"
+	} else if self == TOKEN_NEWLINE {
+		return "NEWLINE"
 	} else if self == TOKEN_PLUS {
 		return "PLUS"
 	} else if self == TOKEN_FUNC {
 		return "FUNC"
 	} else if self == TOKEN_NAME {
 		return "NAME"
+	} else if self == TOKEN_COMMA {
+		return "COMMA"
 	} else if self == TOKEN_PARAN_BEGIN {
 		return "PARAN_BEGIN"
 	} else if self == TOKEN_PARAN_END {
@@ -387,6 +401,8 @@ func (self TokenCode) Name() string {
 		return "CURLY_BEGIN"
 	} else if self == TOKEN_CURLY_END {
 		return "CURLY_END"
+	} else if self == TOKEN_OBJECT {
+		return "OBJECT"
 	}
 	return "UNNAMED"
 }
