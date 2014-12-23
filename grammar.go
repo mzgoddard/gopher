@@ -14,11 +14,13 @@ type Gram interface {
 	Parse(grams *list.List)
 }
 
+type GramIter chan Gram
+
 type Library struct {}
 
 type Parser struct {
 	library *Library
-	root Gram
+	module Gram
 	source string
 	lexer *Lexer
 	tokens *list.List
@@ -27,6 +29,7 @@ type Parser struct {
 
 type GramBase struct {
 	code GramCode
+	name string
 	parent Gram
 	children *list.List
 }
@@ -177,7 +180,9 @@ const (
 	GRAM_LITERAL
 	GRAM_EXPR
 	GRAM_ASSIGN
+	GRAM_RETURN
 	GRAM_STATEMENT
+	GRAM_FUNC_RECEIVER
 	GRAM_FUNC_ARG
 	GRAM_FUNC_ARG_NODE
 	GRAM_FUNC_RETURN
@@ -189,12 +194,71 @@ func GramRoot(self Gram) Gram {
 	return nil
 }
 
-func GramFind(self Gram, match func() bool) Gram {
+func GramFindFunc(self Gram, test func(Gram) bool) Gram {
+	return NewGramIter(self).FilterFunc(test).First()
+}
+
+func GramFind(self Gram, code GramCode) Gram {
+	return NewGramIter(self).Filter(code).First()
+}
+
+func NewGramIter(self Gram) GramIter {
+	if self == nil {
+		return nil
+	}
+
+	c := make(GramIter)
+	go func() {
+		defer close(c)
+		if self.Children() == nil {
+			return
+		}
+		for e := self.Children().Front(); e != nil; e = e.Next() {
+			if gram, ok := e.Value.(Gram); ok {
+				c <- gram
+			}
+		}
+	}()
+	return c
+}
+
+func (self GramIter) FilterFunc(test func(gram Gram) bool) GramIter {
+	c := make(GramIter)
+	go func() {
+		for gram := range self {
+			if test(gram) {
+				c <- gram
+			}
+		}
+		close(c)
+	}()
+	return c
+}
+
+func (self GramIter) Filter(code GramCode) GramIter {
+	return self.FilterFunc(func(gram Gram) bool { return gram.Code() == code })
+}
+
+func (self GramIter) First() Gram {
+	if first, ok := <-self; ok {
+		return first
+	}
 	return nil
 }
 
-func GramFindCode(self Gram, code GramCode) Gram {
-	return nil
+func (self GramIter) Count() int {
+	i := 0
+	for _ = range self {
+		i++
+	}
+	return i
+}
+
+func GramTokenString(gram Gram) string {
+	if gramToken, ok := gram.(*GramToken); ok {
+		return gramToken.token.String()
+	}
+	return ""
 }
 
 func (self *GramBase) AddChild(g Gram) {
@@ -227,7 +291,7 @@ func (self *Parser) Parse() *Parser {
 
 	// create module
 	module := NewGramModule()
-	self.root = module
+	self.module = module
 
 	// parse at module
 	module.Parse(self.grams)
@@ -242,6 +306,12 @@ func NewParser(source string) *Parser {
 	*parser = Parser {
 		source: source,
 	}
+	return parser
+}
+
+func NewDefaultParser() *Parser {
+	parser := new(Parser)
+	*parser = Parser {}
 	return parser
 }
 
@@ -356,10 +426,11 @@ type MatchThen struct {
 }
 
 type Matcher interface {
-	parse(*list.List, *list.Element) (*list.Element, bool)
+	parse(*Parser, *list.List, *list.Element) (*list.Element, bool)
 }
 
 func _parseGrams(
+	self *Parser,
 	grams *list.List,
 	start *list.Element,
 	target []interface {}) (*list.Element, bool) {
@@ -382,34 +453,34 @@ func _parseGrams(
 					break
 				}
 			} else if
-				matchfn, ok :=
-					target[i].(func(*list.List, *list.Element) (*list.Element, bool));
+				matchfn, ok := target[i].(func(
+					*Parser, *list.List, *list.Element) (*list.Element, bool));
 				ok {
-				if nextE, match := matchfn(grams, e); match {
+				if nextE, match := matchfn(self, grams, e); match {
 					i++
 					e = nextE
 				} else {
 					break
 				}
 			} else if
-				matchfn, ok :=
-					target[i].(func(interface {}, *list.Element) (*list.Element, bool));
+				matchfn, ok := target[i].(func(
+					*Parser, interface {}, *list.Element) (*list.Element, bool));
 				ok {
-				if nextE, match := matchfn(grams, e); match {
+				if nextE, match := matchfn(self, grams, e); match {
 					i++
 					e = nextE
 				} else {
 					break
 				}
 			} else if matcher, ok := target[i].(Matcher); ok {
-				if nextE, ok := matcher.parse(grams, e); ok {
+				if nextE, ok := matcher.parse(self, grams, e); ok {
 					i++
 					e = nextE
 				} else {
 					break
 				}
 			} else if capture, ok := target[i].(Capture); ok {
-				if last, match := parseGrams(grams, e, capture.target); match {
+				if last, match := parseGrams(self, grams, e, capture.target); match {
 					i++
 					e = captureGrams(grams, e, last, capture.result).Next()
 				} else {
@@ -417,8 +488,8 @@ func _parseGrams(
 				}
 			} else if match, ok := target[i].(MatchThen); ok {
 				fail := true
-				if _, ok := parseGrams(grams, e, match.target); ok {
-					if nextE, ok := parseGrams(grams, e, match.then); ok {
+				if _, ok := parseGrams(self, grams, e, match.target); ok {
+					if nextE, ok := parseGrams(self, grams, e, match.then); ok {
 						i++
 						fail = false
 						e = nextE
@@ -429,21 +500,21 @@ func _parseGrams(
 				}
 			} else if match, ok := target[i].(MatchMaybe); ok {
 				i++
-				if nextE, ok := parseGrams(grams, e, match.target); ok {
+				if nextE, ok := parseGrams(self, grams, e, match.target); ok {
 					e = nextE
 				}
 			} else if match, ok := target[i].(MatchAnyTimes); ok {
 				i++
 				nextE, ok := e, true
 				for ok {
-					if nextE, ok = parseGrams(grams, nextE, match.target); ok {
+					if nextE, ok = parseGrams(self, grams, nextE, match.target); ok {
 						e = nextE
 					}
 				}
 			} else if match, ok := target[i].(MatchAny); ok {
 				nextE, ok := e, false
 				for j := 0; j < len(match.target) && !ok; j++ {
-					nextE, ok = parseGrams(grams, e, match.target[j])
+					nextE, ok = parseGrams(self, grams, e, match.target[j])
 				}
 				if ok {
 					i++
@@ -468,26 +539,32 @@ func parseToGrams(input string) *list.List {
 }
 
 func parseGrams(
-	grams interface {}, gramE *list.Element, target interface{},
+	self *Parser, grams interface {}, gramE *list.Element, target interface{},
 ) (*list.Element, bool) {
+	if self == nil {
+		return parseGrams(NewDefaultParser(), grams, gramE, target)
+	}
+
 	if gramsString, ok := grams.(string); ok {
 		tokens := parseToGrams(gramsString)
-		return parseGrams(tokens, tokens.Front(), target)
+		return parseGrams(self, tokens, tokens.Front(), target)
 	}
 
 	if gramsList, ok := grams.(*list.List); ok {
 		if targetArray, ok := target.([]interface {}); ok {
-			return _parseGrams(gramsList, gramE, targetArray)
+			return _parseGrams(self, gramsList, gramE, targetArray)
 		} else {
-			return _parseGrams(gramsList, gramE, []interface {} { target })
+			return _parseGrams(self, gramsList, gramE, []interface {} { target })
 		}
 	}
 
 	return nil, false
 }
 
-func (self Match) parse(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, self.target)
+func (self Match) parse(parser *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(parser, grams, start, self.target)
 }
 
 func newMatcher(target interface {}) Matcher {
@@ -507,75 +584,89 @@ func newMatcher(target interface {}) Matcher {
 // 	CaptureLiteral,
 // }}, GRAM_EXPR })
 
-func CaptureExpr(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, Capture { MatchAny { []interface {} {
+func CaptureExpr(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { MatchAny { []interface {} {
 		CaptureLiteral,
 	}}, GRAM_EXPR })
 }
 
-func MatchLines(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, MatchAnyTimes { MatchAny { []interface {} {
-		GRAM_TOKEN_WS,
-		GRAM_TOKEN_NEWLINE,
-	}}})
+func MatchLines(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAnyTimes {
+		MatchAny { []interface {} {
+			GRAM_TOKEN_WS,
+			GRAM_TOKEN_NEWLINE,
+		}},
+	})
 }
 
-func MatchWS(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, MatchAnyTimes {
+func MatchWS(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAnyTimes {
 		GRAM_TOKEN_WS,
 	})
 }
 
-func RequireLines(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, []interface {} {
+func RequireLines(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, []interface {} {
 		GRAM_TOKEN_NEWLINE,
 		MatchLines,
 	})
 }
 
-func CaptureLiteralMember(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, MatchAnyTimes { MatchAny { []interface {} {
-		Capture { MatchAny { []interface {} {
-			[]interface {} {
+func CaptureLiteralMember(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAnyTimes {
+		MatchAny { []interface {} {
+			Capture { MatchAny { []interface {} {
+				[]interface {} {
+					Capture { []interface {} {
+						GRAM_TOKEN_NAME,
+						GRAM_TOKEN_COLON,
+						MatchWS,
+						CaptureExpr,
+						GRAM_TOKEN_COMMA,
+						MatchLines,
+					}, GRAM_LITERAL_NAMED_MEMBER },
+					CaptureLiteralMember,
+				},
 				Capture { []interface {} {
 					GRAM_TOKEN_NAME,
 					GRAM_TOKEN_COLON,
 					MatchWS,
-					CaptureExpr,
-					GRAM_TOKEN_COMMA,
-					MatchLines,
+					MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
+					MatchWS,
 				}, GRAM_LITERAL_NAMED_MEMBER },
-				CaptureLiteralMember,
-			},
-			Capture { []interface {} {
-				GRAM_TOKEN_NAME,
-				GRAM_TOKEN_COLON,
-				MatchWS,
-				MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
-				MatchWS,
-			}, GRAM_LITERAL_NAMED_MEMBER },
-		}}, GRAM_LITERAL_NAMED_MEMBER_NODE },
-		Capture { MatchAny { []interface {} {
-			[]interface {} {
+			}}, GRAM_LITERAL_NAMED_MEMBER_NODE },
+			Capture { MatchAny { []interface {} {
+				[]interface {} {
+					Capture { []interface {} {
+						CaptureExpr,
+						GRAM_TOKEN_COMMA,
+						MatchLines,
+					}, GRAM_LITERAL_MEMBER },
+					CaptureLiteralMember,
+				},
 				Capture { []interface {} {
-					CaptureExpr,
-					GRAM_TOKEN_COMMA,
-					MatchLines,
+					MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
+					MatchWS,
 				}, GRAM_LITERAL_MEMBER },
-				CaptureLiteralMember,
-			},
-			Capture { []interface {} {
-				MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
-				MatchWS,
-			}, GRAM_LITERAL_MEMBER },
-		}}, GRAM_LITERAL_MEMBER_NODE },
-	}}})
+			}}, GRAM_LITERAL_MEMBER_NODE },
+		}},
+	})
 }
 
-func MatchFuncTypeArg(grams *list.List, start *list.Element) (
+func MatchFuncTypeArg(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, MatchAny { []interface {} {
+	return parseGrams(self, grams, start, MatchMaybe { MatchAny { []interface {} {
 		[]interface {} {
 			GRAM_TOKEN_NAME,
 			MatchAnyTimes { []interface {} {
@@ -596,13 +687,13 @@ func MatchFuncTypeArg(grams *list.List, start *list.Element) (
 			MatchType,
 			MatchWS,
 		},
-	}})
+	}}})
 }
 
-func MatchFuncTypeSig(grams *list.List, start *list.Element) (
+func MatchFuncTypeSig(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, []interface {} {
+	return parseGrams(self, grams, start, []interface {} {
 		GRAM_TOKEN_PARAN_BEGIN,
 		MatchLines,
 		MatchFuncTypeArg,
@@ -612,19 +703,19 @@ func MatchFuncTypeSig(grams *list.List, start *list.Element) (
 	})
 }
 
-func MatchFuncType(grams *list.List, start *list.Element) (
+func MatchFuncType(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, []interface {} {
+	return parseGrams(self, grams, start, []interface {} {
 		GRAM_TOKEN_FUNC,
 		MatchFuncTypeSig,
 	})
 }
 
-func MatchObjectMember(grams *list.List, start *list.Element) (
+func MatchObjectMember(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, MatchAnyTimes { []interface {} {
+	return parseGrams(self, grams, start, MatchAnyTimes { []interface {} {
 		GRAM_TOKEN_NAME,
 		MatchAnyTimes { []interface {} {
 			GRAM_TOKEN_COMMA, MatchWS, GRAM_TOKEN_NAME,
@@ -635,18 +726,20 @@ func MatchObjectMember(grams *list.List, start *list.Element) (
 	}})
 }
 
-func MatchInterfaceMember(grams *list.List, start *list.Element) (
+func MatchInterfaceMember(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, MatchAnyTimes { []interface {} {
+	return parseGrams(self, grams, start, MatchAnyTimes { []interface {} {
 		GRAM_TOKEN_NAME,
 		MatchFuncTypeSig,
 		RequireLines,
 	}})
 }
 
-func MatchType(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, MatchAny { []interface {} {
+func MatchType(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
 		[]interface {} {
 			GRAM_TOKEN_SQUARE_BEGIN,
 			GRAM_TOKEN_SQUARE_END,
@@ -677,10 +770,10 @@ func MatchType(grams *list.List, start *list.Element) (*list.Element, bool) {
 	}})
 }
 
-func CaptureFuncTypeArg(grams *list.List, start *list.Element) (
+func CaptureFuncTypeArg(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, MatchAny { []interface {} {
+	return parseGrams(self, grams, start, MatchMaybe { MatchAny { []interface {} {
 		Capture { []interface {} {
 			Capture { []interface {} {
 				GRAM_TOKEN_NAME,
@@ -705,13 +798,27 @@ func CaptureFuncTypeArg(grams *list.List, start *list.Element) (
 				MatchWS,
 			}, GRAM_FUNC_ARG },
 		}, GRAM_FUNC_ARG_NODE },
-	}})
+		Capture { []interface {} {
+			Capture { []interface {} {
+				CaptureType,
+				GRAM_TOKEN_COMMA,
+				MatchLines,
+			}, GRAM_FUNC_ARG },
+			MatchMaybe { CaptureFuncTypeArg },
+		}, GRAM_FUNC_ARG_NODE },
+		Capture { []interface {} {
+			Capture { []interface {} {
+				MatchAny { []interface {} { CaptureType, GRAM_TYPE }},
+				MatchWS,
+			}, GRAM_FUNC_ARG },
+		}, GRAM_FUNC_ARG_NODE },
+	}}})
 }
 
-func CaptureFuncTypeSig(grams *list.List, start *list.Element) (
+func CaptureFuncTypeSig(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, []interface {} {
+	return parseGrams(self, grams, start, []interface {} {
 		GRAM_TOKEN_PARAN_BEGIN,
 		MatchLines,
 		CaptureFuncTypeArg,
@@ -721,19 +828,19 @@ func CaptureFuncTypeSig(grams *list.List, start *list.Element) (
 	})
 }
 
-func CaptureFuncType(grams *list.List, start *list.Element) (
+func CaptureFuncType(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, Capture { []interface {} {
+	return parseGrams(self, grams, start, Capture { []interface {} {
 		GRAM_TOKEN_FUNC,
 		CaptureFuncTypeSig,
-	}, GRAM_FUNC })
+	}, GRAM_FUNC_TYPE })
 }
 
-func CaptureObjectMember(grams *list.List, start *list.Element) (
+func CaptureObjectMember(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, []interface {} {
+	return parseGrams(self, grams, start, []interface {} {
 		MatchMaybe { Capture { []interface {} {
 			GRAM_TOKEN_NAME,
 			RequireLines,
@@ -750,18 +857,52 @@ func CaptureObjectMember(grams *list.List, start *list.Element) (
 	})
 }
 
-func CaptureInterfaceMember(grams *list.List, start *list.Element) (
+func CaptureInterfaceMember(
+	self *Parser, grams *list.List, start *list.Element,
+) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, MatchAnyTimes { Capture { []interface {} {
-		GRAM_TOKEN_NAME,
-		CaptureFuncTypeSig,
-		RequireLines,
-	}, GRAM_INTERFACE_MEMBER }})
+	return parseGrams(self, grams, start, MatchAnyTimes { Capture {
+		[]interface {} {
+			GRAM_TOKEN_NAME,
+			CaptureFuncTypeSig,
+			RequireLines,
+		},
+		GRAM_INTERFACE_MEMBER,
+	}})
 }
 
-func CaptureType(grams *list.List, start *list.Element) (*list.Element, bool) {
-	return parseGrams(grams, start, Capture { MatchAny { []interface {} {
+func CaptureObjectType(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		GRAM_TOKEN_OBJECT,
+		MatchWS,
+		GRAM_TOKEN_CURLY_BEGIN,
+		MatchLines,
+		CaptureObjectMember,
+		GRAM_TOKEN_CURLY_END,
+	}, GRAM_OBJECT_TYPE })
+}
+
+
+func CaptureInterfaceType(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		GRAM_TOKEN_INTERFACE,
+		MatchWS,
+		GRAM_TOKEN_CURLY_BEGIN,
+		MatchLines,
+		CaptureInterfaceMember,
+		GRAM_TOKEN_CURLY_END,
+	}, GRAM_INTERFACE_TYPE })
+}
+
+func CaptureType(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { MatchAny { []interface {} {
 		[]interface {} {
 			GRAM_TOKEN_SQUARE_BEGIN,
 			GRAM_TOKEN_SQUARE_END,
@@ -771,31 +912,36 @@ func CaptureType(grams *list.List, start *list.Element) (*list.Element, bool) {
 			GRAM_TOKEN_ASTERICK,
 			CaptureType,
 		},
-		Capture { []interface {} {
-			GRAM_TOKEN_OBJECT,
-			MatchWS,
-			GRAM_TOKEN_CURLY_BEGIN,
-			MatchLines,
-			CaptureObjectMember,
-			GRAM_TOKEN_CURLY_END,
-		}, GRAM_OBJECT_TYPE },
-		Capture { []interface {} {
-			GRAM_TOKEN_INTERFACE,
-			MatchWS,
-			GRAM_TOKEN_CURLY_BEGIN,
-			MatchLines,
-			CaptureInterfaceMember,
-			GRAM_TOKEN_CURLY_END,
-		}, GRAM_INTERFACE_TYPE },
+		CaptureObjectType,
+		CaptureInterfaceType,
 		CaptureFuncType,
 		GRAM_TOKEN_NAME,
 	}}, GRAM_TYPE })
 }
 
-func CaptureLiteral(grams *list.List, start *list.Element) (
+func CaptureLiteralType(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(grams, start, Capture { MatchAny { []interface {} {
+	return parseGrams(self, grams, start, Capture { MatchAny { []interface {} {
+		[]interface {} {
+			GRAM_TOKEN_SQUARE_BEGIN,
+			GRAM_TOKEN_SQUARE_END,
+			CaptureType,
+		},
+		[]interface {} {
+			GRAM_TOKEN_ASTERICK,
+			CaptureType,
+		},
+		CaptureObjectType,
+		CaptureInterfaceType,
+		GRAM_TOKEN_NAME,
+	}}, GRAM_TYPE })
+}
+
+func CaptureLiteral(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { MatchAny { []interface {} {
 		GRAM_TOKEN_INT,
 		GRAM_TOKEN_REAL,
 		GRAM_TOKEN_CHAR,
@@ -803,16 +949,106 @@ func CaptureLiteral(grams *list.List, start *list.Element) (
 		MatchThen { []interface {} {
 			MatchType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
 		}, Capture { []interface {} {
-			CaptureType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
+			CaptureLiteralType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
 			MatchLines, CaptureLiteralMember,
 			GRAM_TOKEN_CURLY_END,
 		}, GRAM_LITERAL_OBJECT }},
 		Capture { []interface {} {
 			GRAM_TOKEN_CURLY_BEGIN,
-			 MatchLines, CaptureLiteralMember,
+			MatchLines, CaptureLiteralMember,
 			GRAM_TOKEN_CURLY_END,
 		}, GRAM_LITERAL_OBJECT },
 	}}, GRAM_LITERAL })
+}
+
+func CaptureReturn(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		GRAM_TOKEN_RETURN,
+		MatchMaybe { MatchAny { []interface {} {
+			[]interface {} { GRAM_TOKEN_WS, CaptureExpr },
+		}}},
+	}, GRAM_RETURN })
+}
+
+func CaptureStatements(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAnyTimes {
+		Capture { []interface {} {
+			MatchAny { []interface {} {
+				CaptureReturn,
+			}},
+			RequireLines,
+		}, GRAM_STATEMENT },
+	})
+}
+
+func CaptureFuncArg(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchMaybe {
+		Capture { MatchAny { []interface {} {
+			[]interface {} {
+				Capture { []interface {} {
+					GRAM_TOKEN_NAME,
+					MatchAnyTimes { []interface {} {
+						GRAM_TOKEN_COMMA, MatchWS, GRAM_TOKEN_NAME,
+					}},
+					GRAM_TOKEN_WS,
+					CaptureType,
+					GRAM_TOKEN_COMMA,
+					MatchLines,
+				}, GRAM_FUNC_ARG },
+				MatchMaybe { CaptureFuncArg },
+			},
+			Capture { []interface {} {
+				GRAM_TOKEN_NAME,
+				MatchAnyTimes { []interface {} {
+					GRAM_TOKEN_COMMA, MatchWS, GRAM_TOKEN_NAME,
+				}},
+				GRAM_TOKEN_WS,
+				MatchAny { []interface {} { CaptureType, GRAM_TYPE }},
+				MatchWS,
+			}, GRAM_FUNC_ARG },
+		}}, GRAM_FUNC_ARG_NODE },
+	})
+}
+
+func CaptureFunc(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		GRAM_TOKEN_FUNC, GRAM_TOKEN_WS,
+		MatchMaybe { Capture { []interface {} {
+			GRAM_TOKEN_PARAN_BEGIN, MatchLines,
+			GRAM_TOKEN_NAME, CaptureType, MatchLines,
+			GRAM_TOKEN_PARAN_END, MatchLines,
+		}, GRAM_FUNC_RECEIVER }},
+		GRAM_TOKEN_NAME, MatchWS,
+		GRAM_TOKEN_PARAN_BEGIN, MatchLines,
+		CaptureFuncArg,
+		GRAM_TOKEN_PARAN_END, MatchWS,
+		MatchMaybe { []interface {} {
+			Capture { CaptureType, GRAM_FUNC_RETURN },
+			MatchWS,
+		}},
+		GRAM_TOKEN_CURLY_BEGIN, MatchLines,
+		CaptureStatements,
+		GRAM_TOKEN_CURLY_END,
+	}, GRAM_FUNC })
+}
+
+func CaptureModule(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		MatchLines,
+		MatchAnyTimes { MatchAny { []interface {} {
+			[]interface {} { CaptureFunc, RequireLines },
+		}}},
+	}, GRAM_MODULE })
 }
 
 func captureGrams(

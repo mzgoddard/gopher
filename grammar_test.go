@@ -7,210 +7,158 @@ import (
 )
 
 func TestMatchGrammar(t *testing.T) {
-	// grams := gramCodesToList([]GramCode {
-	// 	GRAM_TOKEN_NAME,
-	// })
-	// target := []interface {} {
-	// 	GRAM_TOKEN_NAME,
-	// }
-	// if _, match := matchGramsElement(grams.Front(), target); !match {
-	// 	t.Error("NAME matches NAME")
-	// }
-	// // if nextE, _ := matchGramsElement(grams.Front(), target); nextE == nil {
-	// // 	t.Error("NAME matches NAME")
-	// // }
-	// if !matchGrams(grams, target) {
-	// 	t.Error("NAME matches NAME")
-	// }
-	// if !matchGrams(grams, GRAM_TOKEN_NAME) {
-	// 	t.Error("NAME matches NAME")
-	// }
-	// grams = gramCodesToList([]GramCode {
-	// 	GRAM_TOKEN_NAME,
-	// })
-	// target = []interface {} {
-	// 	GRAM_TOKEN_FUNC,
-	// }
-	// if matchGrams(grams, target) {
-	// 	t.Error("NAME doesn't match FUNC")
-	// }
-	// // func name() {}
-	// grams = gramCodesToList([]GramCode {
-	// 	GRAM_TOKEN_FUNC, GRAM_TOKEN_WS,
-	// 	GRAM_TOKEN_NAME, GRAM_TOKEN_PARAN_BEGIN, GRAM_TOKEN_PARAN_END,
-	// 	GRAM_TOKEN_WS, GRAM_TOKEN_CURLY_BEGIN, GRAM_TOKEN_CURLY_END,
-	// })
-	// target = []interface {} {
-	// 	GRAM_TOKEN_FUNC, GRAM_TOKEN_WS,
-	// 	GRAM_TOKEN_NAME, GRAM_TOKEN_PARAN_BEGIN, GRAM_TOKEN_PARAN_END,
-	// 	GRAM_TOKEN_WS, GRAM_TOKEN_CURLY_BEGIN, GRAM_TOKEN_CURLY_END,
-	// }
-	// if !matchGrams(grams, target) {
-	// 	t.Error("many tokens matches many tokens")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("func name() {}"))
-	// if !matchGrams(grams, target) {
-	// 	t.Error("Parsed func declartion matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("object {}"))
-	// if _, match := matchGramObjectType(grams.Front()); !match {
-	// 	t.Error("Parsed object type matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("object {\n  name Type\n}"))
-	// // t.Log(codesAsNames(tokensCodeArray(ParseAllTokens(
-	// // 	"object {\n  name, word Type}"
-	// // ))))
-	// if _, match := matchGramObjectType(grams.Front()); !match {
-	// 	t.Error("Parsed object type with 1 member matches")
-	// }
-	//
-	// if _, match := matchGramType(grams.Front()); !match {
-	// 	t.Error("Parsed object type with 1 member matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("interface {}"))
-	// if _, match := matchGramInterfaceType(grams.Front()); !match {
-	// 	t.Error("Parsed interface type matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("interface {\n  String()\n}"))
-	// if _, match := matchGramInterfaceType(grams.Front()); !match {
-	// 	t.Error("Parsed interface type with 1 member matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens(
-	// 	"interface {\n  String(a, b X) string\n}",
-	// ))
-	// if _, match := matchGramInterfaceType(grams.Front()); !match {
-	// 	t.Error("Parsed interface type with 1 member matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("func()"))
-	// if _, match := matchGramFuncType(grams.Front()); !match {
-	// 	t.Error("Parsed func type matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("func(a Char) Type"))
-	// if _, match := matchGramFuncType(grams.Front()); !match {
-	// 	t.Error("Parsed func type with args and return matches")
-	// }
-	//
-	// grams = tokensToGrams(ParseAllTokens("func(a, b Char, c, d X) Type"))
-	// if _, match := matchGramFuncType(grams.Front()); !match {
-	// 	t.Error("Parsed func type with args and return matches")
-	// }
-	//
-	// input := "func(a, b Char, c, d X,\n) Type"
-	// grams = tokensToGrams(ParseAllTokens(input))
-	// if _, match := matchGramFuncType(grams.Front()); !match {
-	// 	t.Error("Parsed func type with args and return matches")
-	// }
-	//
-	// input = "func(\n  a, b Char,\n  c, d X,\n) Type"
-	// grams = tokensToGrams(ParseAllTokens(input))
-	// if _, match := matchGramFuncType(grams.Front()); !match {
-	// 	t.Error("Parsed func type with args and return matches")
-	// }
-	//
-	// if _, ok := parseGrams("[]input", nil, MatchType); !ok {
-	// 	t.Error("Matches array type.")
-	// }
-	//
-	// if grams, ok := parseFromString("[]input{}", CaptureType); ok {
-	// 	if grams.Len() != 4 {
-	// 		t.Error("Capture leaves 4 tokens.")
-	// 	}
-	// 	if _, ok := parseGrams(grams, grams.Front(), GRAM_TYPE); !ok {
-	// 		t.Error("Captures array type.")
-	// 	}
-	// 	if nextGram, _ := parseGrams(grams, grams.Front(), GRAM_TYPE);
-	// 		nextGram == nil {
-	// 		t.Error("Capture points at next element.")
-	// 	}
-	// 	if !checkGram(grams.Front(), []interface {} {
-	// 		GRAM_TOKEN_SQUARE_BEGIN, GRAM_TOKEN_SQUARE_END, GRAM_TYPE,
-	// 	}) {
-	// 		t.Error("Capture contains array type.")
-	// 	}
-	// } else {
-	// 	t.Error("Captures array type.")
-	// }
-	//
-	// if _, ok := parseGrams("input{}", nil, []interface {} {
-	// 	Capture { []interface {} {
-	// 		CaptureType, GRAM_TOKEN_CURLY_BEGIN, GRAM_TOKEN_CURLY_END,
-	// 	}, GRAM_LITERAL_OBJECT },
-	// 	}); !ok {
-	// 	t.Error("Captures custom literal.")
-	// }
-
-	testCapture(t, "123", "literal", CaptureLiteral)
-	testCapture(t, "\"abc\"", "literal", CaptureLiteral)
-	testCapture(t, "input{}", "literal", CaptureLiteral)
-	testCapture(t, "{}", "literal", CaptureLiteral)
-	testCapture(t, "input {}", "literal", CaptureLiteral)
-	testCapture(t, "input { }", "literal", CaptureLiteral)
-	testCapture(t, "123", "expr", CaptureExpr)
-	confirmCapture(t, "1", "literal member", CaptureLiteralMember,
-		[]interface {} {
-			GRAM_LITERAL_MEMBER_NODE,
-		},
+	confirmObjectType := confirmFactory(
+		t, "object type", CaptureObjectType, GRAM_OBJECT_TYPE,
 	)
-	testCapture(t, "1,", "literal member", CaptureLiteralMember)
-	testCapture(t, "1,2", "literal member", CaptureLiteralMember)
-	testCapture(t, "1, 2", "literal member", CaptureLiteralMember)
-	testCapture(t, "1, 2 ", "literal member", CaptureLiteralMember)
-	testCapture(t, "1,2,", "literal member", CaptureLiteralMember)
-	testCapture(t, "1, 2, ", "literal member", CaptureLiteralMember)
+	confirmObjectType("object {}")
+	confirmObjectType("object {\n  name Type\n}")
+
+	confirmInterfaceType := confirmFactory(
+		t, "interface type", CaptureInterfaceType, GRAM_INTERFACE_TYPE,
+	)
+	confirmInterfaceType("interface {}")
+	confirmInterfaceType("interface {\n  String()\n}")
+	confirmInterfaceType("interface {\n  String(a, b X) string\n}")
+
+	confirmFuncType := confirmFactory(
+		t, "func type", CaptureFuncType, GRAM_FUNC_TYPE,
+	)
+	// dontFunc := dontFactory(t, "func type", CaptureFuncType)
+	confirmFuncType("func()")
+	confirmFuncType("func(Char)")
+	confirmFuncType("func(Char, String)")
+	confirmFuncType("func(Char, String) Type")
+	confirmFuncType("func(Char, String,)")
+	confirmFuncType("func(Char, String,) Type")
+	confirmFuncType("func(a Char) Type")
+	confirmFuncType("func(a, b Char, c, d X) Type")
+	confirmFuncType("func(a, b Char, c, d X,\n) Type")
+	confirmFuncType("func(\n  a, b Char,\n  c, d X,\n) Type")
+	confirmFuncType("func(a, b Char, X)")
+	confirmFuncType("func(Char, a, b X)")
+
+	confirmCapture(t, "[]input", "type", CaptureType, GRAM_TYPE)
+
+	testLiteral := testFactory(t, "literal", CaptureLiteral)
+	testLiteral("123")
+	testLiteral("\"abc\"")
+	testLiteral("input{}")
+	testLiteral("{}")
+	testLiteral("input {}")
+	testLiteral("input { }")
+
+	// testExpr := testFactory(t, "expr", CaptureExpr)
+	confirmExpr := confirmFactory(t, "expr", CaptureExpr, []interface {} {
+		GRAM_EXPR, GRAM_TOKEN_EOF,
+	})
+	confirmExpr("123")
+
+	testLiteralMember := testFactory(t, "literal member", CaptureLiteralMember)
+	confirmLiteralMember := confirmFactory(
+		t, "literal member", CaptureLiteralMember, GRAM_LITERAL_MEMBER_NODE,
+	)
+	confirmLiteralMember("1")
+	testLiteralMember("1,")
+	testLiteralMember("1,2")
+	testLiteralMember("1, 2")
+	testLiteralMember("1,2,")
+	testLiteralMember("1, 2, ")
 	testCapture(t, "1", "literal member", []interface {} {
 		CaptureExpr, MatchMaybe { []interface {} { GRAM_TOKEN_COMMA, MatchLines }},
 	})
-	testCapture(t, "input {1}", "literal", CaptureLiteral)
-	testCapture(t, "input { 1 }", "literal", CaptureLiteral)
-	testCapture(t, "input { 1, }", "literal", CaptureLiteral)
-	testCapture(t, "input {\n1,\n}", "literal", CaptureLiteral)
-	testCapture(t, "input {1,2}", "literal", CaptureLiteral)
-	testCapture(t, "input { 1, 2 }", "literal", CaptureLiteral)
-	testCapture(t, "input { 1, 2, }", "literal", CaptureLiteral)
-	testCapture(t, "input { 1,\n 2,\n }", "literal", CaptureLiteral)
+
+	testLiteral("input {1}")
+	confirmCapture(t, "input {1}", "literal", CaptureLiteral, []interface {} {
+		GRAM_LITERAL, GRAM_TOKEN_EOF,
+	})
+	testLiteral("input { 1 }")
+	testLiteral("input { 1, }")
+	testLiteral("input {\n1,\n}")
+	testLiteral("input {1,2}")
+	testLiteral("input { 1, 2 }")
+	testLiteral("input { 1, 2, }")
+	testLiteral("input { 1,\n 2,\n }")
 	dontCapture(t, "input { 1,\n 2\n }", "literal", CaptureLiteral)
 
-	testCapture(t, "{ 1, 2 }", "literal", CaptureLiteral)
-	testCapture(t, "{ 1, 2, }", "literal", CaptureLiteral)
+	testLiteral("{ 1, 2 }")
+	testLiteral("{ 1, 2, }")
 
 	testCapture(t, "a:1", "custom", []interface {} {
 		GRAM_TOKEN_NAME, GRAM_TOKEN_COLON, GRAM_TOKEN_INT,
 	})
-	testCapture(t, "input { a: 1, b: 2 }", "literal", CaptureLiteral)
-	testCapture(t, "input { a: 1, b: 2, }", "literal", CaptureLiteral)
+	testLiteral("input { a: 1, b: 2 }")
+	testLiteral("input { a: 1, b: 2, }")
+
+	confirmFuncReturn := confirmFactory(t, "func return",
+		CaptureReturn, []interface {} {
+			GRAM_RETURN, GRAM_TOKEN_EOF,
+		},
+	)
+	confirmFuncReturn("return")
+	confirmFuncReturn("return 0")
+
+	confirmFunc := confirmFactory(t, "func", CaptureFunc, []interface {} {
+		GRAM_FUNC, GRAM_TOKEN_EOF,
+	})
+	confirmFunc("func name() {}")
+	confirmFunc("func name(a Char) {}")
+	confirmFunc("func name(a Char, b Char) {}")
+	confirmFunc("func name(a, b Char) {}")
+	confirmFunc("func name() {\n  return\n}")
+	confirmFunc("func name() int {}")
+	confirmFunc("func name() int {\n}")
+	// confirmFunc("func name() int {return 0}")
+	confirmFunc("func name() int {\n  return 0\n}")
 
 	// if matchGrams()
 }
 
 func testCapture(t *testing.T, input, name string, target interface {}) {
-	if _, ok := parseGrams(input, nil, target); !ok {
+	if _, ok := parseGrams(nil, input, nil, target); !ok {
 		t.Errorf("Captures %s. Input: %s", name, input)
+	}
+}
+
+func testFactory(t *testing.T, name string, target interface {},
+	) func(input string) {
+	return func(input string) {
+		testCapture(t, input, name, target)
 	}
 }
 
 func confirmCapture(
 	t *testing.T, input, name string, target, confirm interface {}) {
 	grams := parseToGrams(input)
-	if _, ok := parseGrams(grams, grams.Front(), target); !ok {
+	if _, ok := parseGrams(nil, grams, grams.Front(), target); !ok {
 		t.Errorf("Captures %s. Input: %s", name, input)
 	} else {
-		if _, ok := parseGrams(grams, grams.Front(), confirm); !ok {
+		if _, ok := parseGrams(nil, grams, grams.Front(), confirm); !ok {
+			t.Log(grams.Front().Value, grams.Front().Next().Value)
+			if gram, ok := grams.Front().Next().Value.(*GramToken); ok {
+				t.Log(gram.token.String(), gram.token.line, gram.token.column)
+			}
 			t.Errorf("Confirms %s. Input: %s", name, input)
 		}
 	}
 }
 
+func confirmFactory(t *testing.T, name string, target, confirm interface{},
+	) func(string) {
+	return func(input string) {
+		confirmCapture(t, input, name, target, confirm)
+	}
+}
+
 func dontCapture(t *testing.T, input, result string, target interface {}) {
-	if _, ok := parseGrams(input, nil, target); ok {
+	if _, ok := parseGrams(nil, input, nil, target); ok {
 		t.Errorf("Doesn't capture %s. Input: %s", result, input)
+	}
+}
+
+func dontFactory(t *testing.T, name string, target interface {},
+	) func(input string) {
+	return func(input string) {
+		dontCapture(t, input, name, target)
 	}
 }
 
@@ -239,7 +187,7 @@ func gramListToCodes(grams *list.List) []GramCode {
 func checkGram(gram *list.Element, target interface {}) bool {
 	if base, ok := gram.Value.(Gram); ok {
 		children := base.Children()
-		if _, ok := parseGrams(children, children.Front(), target); ok {
+		if _, ok := parseGrams(nil, children, children.Front(), target); ok {
 			return ok
 		}
 	}
@@ -248,6 +196,6 @@ func checkGram(gram *list.Element, target interface {}) bool {
 
 func parseFromString(input string, target interface {}) (*list.List, bool) {
 	grams := parseToGrams(input)
-	_, ok := parseGrams(grams, grams.Front(), target)
+	_, ok := parseGrams(nil, grams, grams.Front(), target)
 	return grams, ok
 }
