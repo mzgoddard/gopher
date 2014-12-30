@@ -110,6 +110,25 @@ func TestMatchGrammar(t *testing.T) {
 	// confirmFunc("func name() int {return 0}")
 	confirmFunc("func name() int {\n  return 0\n}")
 
+	confirmFunc("func (self Receiver) name() {}")
+
+	confirmDefineType := confirmFactory(t, "typedef", CaptureDefineType,
+		[]interface {} {
+			GRAM_DEFINE_TYPE, GRAM_TOKEN_EOF,
+		},
+	)
+	confirmDefineType("type Word string")
+	// confirmDefineType("type Vec2 object { x, y real }")
+	confirmDefineType("type Vec2 object { x, y real\n}")
+
+	confirmModule := confirmFactory(t, "typedef", CaptureModule, []interface {} {
+		GRAM_MODULE, GRAM_TOKEN_EOF,
+	})
+
+	confirmModule("package name\ntype Word string\n")
+	confirmModule("package name\nfunc main() {}\n")
+	confirmModule("package name\ntype Word string\nfunc main() {}\n")
+
 	// if matchGrams()
 }
 

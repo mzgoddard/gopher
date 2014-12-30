@@ -48,6 +48,8 @@ const (
 	TOKEN_IF
 	TOKEN_ELSE
 	TOKEN_RETURN
+	TOKEN_PACKAGE
+	TOKEN_IMPORT
 	TOKEN_NULL
 	TOKEN_INT
 	TOKEN_REAL
@@ -230,7 +232,10 @@ func (self *Lexer) matchName(token *Token) bool {
 	index := self.index
 	c := self.source[index]
 	isName := false
-	for c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' {
+	for c >= 'a' && c <= 'z' ||
+		c >= 'A' && c <= 'Z' ||
+		c == '_' ||
+		c >= '0' && c <= '9' {
 		isName = true
 		index++
 		if index < len(self.source) {
@@ -322,6 +327,10 @@ func (self *Lexer) ParseToken() Token {
 	} else if self.matchWord(&token, "else", TOKEN_ELSE) {
 		return token
 	} else if self.matchWord(&token, "return", TOKEN_RETURN) {
+		return token
+	} else if self.matchWord(&token, "package", TOKEN_PACKAGE) {
+		return token
+	} else if self.matchWord(&token, "import", TOKEN_IMPORT) {
 		return token
 	} else if self.matchWord(&token, "null", TOKEN_NULL) {
 		return token

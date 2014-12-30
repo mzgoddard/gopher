@@ -29,7 +29,7 @@ type Parser struct {
 
 type GramBase struct {
 	code GramCode
-	name string
+	name, filePath string
 	parent Gram
 	children *list.List
 }
@@ -39,10 +39,10 @@ type GramToken struct {
 	token *Token
 }
 
-type GramModule struct {
-	GramBase
-	declaredTypes []GramDeclareType
-}
+// type GramModule struct {
+// 	GramBase
+// 	declaredTypes []GramDeclareType
+// }
 
 type GramNameType struct {}
 type GramPtrType struct {}
@@ -156,6 +156,8 @@ const (
 	GRAM_TOKEN_IF
 	GRAM_TOKEN_ELSE
 	GRAM_TOKEN_RETURN
+	GRAM_TOKEN_PACKAGE
+	GRAM_TOKEN_IMPORT
 	GRAM_TOKEN_NULL
 	GRAM_TOKEN_INT
 	GRAM_TOKEN_REAL
@@ -171,7 +173,7 @@ const (
 	GRAM_INTERFACE_MEMBER
 	GRAM_INTERFACE_TYPE
 	GRAM_TYPE
-	GRAM_DECLARE_TYPE
+	GRAM_DEFINE_TYPE
 	GRAM_LITERAL_MEMBER
 	GRAM_LITERAL_NAMED_MEMBER
 	GRAM_LITERAL_MEMBER_NODE
@@ -187,11 +189,38 @@ const (
 	GRAM_FUNC_ARG_NODE
 	GRAM_FUNC_RETURN
 	GRAM_FUNC
+	GRAM_PACKAGE_ID
 	GRAM_MODULE
 )
 
 func GramRoot(self Gram) Gram {
-	return nil
+	root := GramIterParents(self).Last()
+	if root == nil {
+		root = self
+	}
+	return root
+}
+
+func GramModule(self Gram) Gram {
+	if self.Code() == GRAM_MODULE {
+		return self
+	} else {
+		return GramIterParents(self).Filter(GRAM_MODULE).First()
+	}
+}
+
+func GramIterModules(self Gram) GramIter {
+	root := GramRoot(self)
+	if root.Code() == GRAM_MODULE {
+		c := make(GramIter)
+		go func() {
+			c <- root
+			close(c)
+		}()
+		return c
+	} else {
+		return NewGramIter(root).Filter(GRAM_MODULE)
+	}
 }
 
 func GramFindFunc(self Gram, test func(Gram) bool) Gram {
@@ -202,14 +231,35 @@ func GramFind(self Gram, code GramCode) Gram {
 	return NewGramIter(self).Filter(code).First()
 }
 
-func NewGramIter(self Gram) GramIter {
-	if self == nil {
-		return nil
-	}
+func GramFindNamed(self Gram, code GramCode, name string) Gram {
+	return NewGramIter(self).FilterNamed(code, name).First()
+}
 
+func GramSearch(self Gram, code GramCode) Gram {
+	return NewGramWalk(self).Filter(code).First()
+}
+
+func GramIterParents(self Gram) GramIter {
 	c := make(GramIter)
 	go func() {
 		defer close(c)
+		if self == nil || self.Children() == nil {
+			return
+		}
+		for parent := self.Parent(); parent != nil; parent = parent.Parent() {
+			c <- parent
+		}
+	}()
+	return c
+}
+
+func NewGramIter(self Gram) GramIter {
+	c := make(GramIter)
+	go func() {
+		defer close(c)
+		if self == nil {
+			return
+		}
 		if self.Children() == nil {
 			return
 		}
@@ -222,15 +272,42 @@ func NewGramIter(self Gram) GramIter {
 	return c
 }
 
+func NewGramWalk(self Gram) GramIter {
+	c := make(GramIter)
+	go func() {
+		defer close(c)
+		for gram := range NewGramIter(self) {
+			c <- gram
+			for subgram := range NewGramWalk(gram) {
+				c <- subgram
+			}
+		}
+	}()
+	return c
+}
+
+func (self GramIter) Children() GramIter {
+	c := make(GramIter)
+	go func() {
+		defer close(c)
+		for gram := range self {
+			for subgram := range NewGramIter(gram) {
+				c <- subgram
+			}
+		}
+	}()
+	return c
+}
+
 func (self GramIter) FilterFunc(test func(gram Gram) bool) GramIter {
 	c := make(GramIter)
 	go func() {
+		defer close(c)
 		for gram := range self {
 			if test(gram) {
 				c <- gram
 			}
 		}
-		close(c)
 	}()
 	return c
 }
@@ -239,11 +316,26 @@ func (self GramIter) Filter(code GramCode) GramIter {
 	return self.FilterFunc(func(gram Gram) bool { return gram.Code() == code })
 }
 
+func (self GramIter) FilterNamed(code GramCode, name string) GramIter {
+	return self.FilterFunc(func(gram Gram) bool {
+		if gramBase, ok := gram.(*GramBase); ok {
+			return gram.Code() == code && gramBase.name == name
+		}
+		return false
+	})
+}
+
 func (self GramIter) First() Gram {
 	if first, ok := <-self; ok {
 		return first
 	}
 	return nil
+}
+
+func (self GramIter) Last() Gram {
+	var last Gram = nil
+	for last = range self {}
+	return last
 }
 
 func (self GramIter) Count() int {
@@ -254,11 +346,57 @@ func (self GramIter) Count() int {
 	return i
 }
 
+func GramName(gram Gram) string {
+	if gramBase, ok := gram.(*GramBase); ok {
+		return gramBase.name
+	}
+	return ""
+}
+
 func GramTokenString(gram Gram) string {
+	if gram == nil {
+		return ""
+	}
 	if gramToken, ok := gram.(*GramToken); ok {
 		return gramToken.token.String()
 	}
 	return ""
+}
+
+func GramModuleName(gram Gram) string {
+	if gram.Code() == GRAM_MODULE {
+		return GramName(gram)
+	} else {
+		return GramModuleName(GramIterParents(gram).Filter(GRAM_MODULE).First())
+	}
+}
+
+func GramTypeName(gram Gram) string {
+	if gram.Code() == GRAM_TYPE {
+		return GramTokenString(NewGramWalk(gram).Filter(GRAM_TOKEN_NAME).Last())
+	} else if gram.Code() == GRAM_DEFINE_TYPE {
+		return GramTokenString(GramFind(gram, GRAM_TOKEN_NAME))
+	}
+	return ""
+}
+
+func GramTypeModuleName(gram Gram) string {
+	if gram.Code() == GRAM_TYPE {
+		lastGramType := NewGramWalk(gram).Filter(GRAM_TYPE).Last()
+		nameCount := NewGramIter(gram).Filter(GRAM_TYPE).Count()
+		if nameCount > 1 {
+			return GramTokenString(GramFind(lastGramType, GRAM_TOKEN_NAME))
+		} else {
+			return GramModuleName(gram)
+		}
+	} else if gram.Code() == GRAM_DEFINE_TYPE {
+		return GramModuleName(gram)
+	}
+	return "PH"
+}
+
+func GramTypeFullName(gram Gram) string {
+	return GramTypeModuleName(gram) + "." + GramTypeName(gram)
 }
 
 func (self *GramBase) AddChild(g Gram) {
@@ -281,23 +419,23 @@ func tokensToGrams(tokens *list.List) *list.List {
 	return grams
 }
 
-func (self *Parser) Parse() *Parser {
-	// lex
-	self.lexer = NewLexer(self.source)
-	self.tokens = self.lexer.ParseAllTokens()
-
-	// turn tokens into grams
-	self.grams = tokensToGrams(self.tokens)
-
-	// create module
-	module := NewGramModule()
-	self.module = module
-
-	// parse at module
-	module.Parse(self.grams)
-
-	return self
-}
+// func (self *Parser) Parse() *Parser {
+// 	// lex
+// 	self.lexer = NewLexer(self.source)
+// 	self.tokens = self.lexer.ParseAllTokens()
+//
+// 	// turn tokens into grams
+// 	self.grams = tokensToGrams(self.tokens)
+//
+// 	// create module
+// 	module := NewGramModule()
+// 	self.module = module
+//
+// 	// parse at module
+// 	module.Parse(self.grams)
+//
+// 	return self
+// }
 
 func (self *Parser) Transform(root Gram) {}
 
@@ -350,17 +488,17 @@ func (self *GramBase) Parse(grams *list.List) {}
 
 func (self *GramBase) Transform(gram Gram) {}
 
-func NewGramModule() *GramModule {
-	gram := new(GramModule)
-	*gram = GramModule {
-		GramBase: GramBase {
-			code: GRAM_MODULE,
-		},
-	}
-	return gram
-}
+// func NewGramModule() *GramModule {
+// 	gram := new(GramModule)
+// 	*gram = GramModule {
+// 		GramBase: GramBase {
+// 			code: GRAM_MODULE,
+// 		},
+// 	}
+// 	return gram
+// }
 
-func (self GramModule) Parse(grams *list.List) {}
+// func (self GramModule) Parse(grams *list.List) {}
 
 // func (self *GramLiteral) Parse(grams *list.List) {
 // 	if matchGrams(grams, []interface {} { GRAM_TOKEN_INT }) {
@@ -472,6 +610,13 @@ func _parseGrams(
 				} else {
 					break
 				}
+			} else if gramDo, ok := target[i].(func(*Parser, *GramBase)); ok {
+				// fmt.Print("gramDo\n")
+				if gramBase, ok := gram.(*GramBase); ok {
+					gramDo(self, gramBase)
+				}
+				i++
+				e = e.Next()
 			} else if matcher, ok := target[i].(Matcher); ok {
 				if nextE, ok := matcher.parse(self, grams, e); ok {
 					i++
@@ -625,26 +770,32 @@ func CaptureLiteralMember(self *Parser, grams *list.List, start *list.Element) (
 ) {
 	return parseGrams(self, grams, start, MatchAnyTimes {
 		MatchAny { []interface {} {
-			Capture { MatchAny { []interface {} {
-				[]interface {} {
+			MatchThen {
+				Capture { MatchAny { []interface {} {
+					[]interface {} {
+						Capture { []interface {} {
+							GRAM_TOKEN_NAME,
+							GRAM_TOKEN_COLON,
+							MatchWS,
+							CaptureExpr,
+							GRAM_TOKEN_COMMA,
+							MatchLines,
+						}, GRAM_LITERAL_NAMED_MEMBER },
+						CaptureLiteralMember,
+					},
 					Capture { []interface {} {
 						GRAM_TOKEN_NAME,
 						GRAM_TOKEN_COLON,
 						MatchWS,
-						CaptureExpr,
-						GRAM_TOKEN_COMMA,
-						MatchLines,
+						MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
+						MatchWS,
 					}, GRAM_LITERAL_NAMED_MEMBER },
-					CaptureLiteralMember,
+				}}, GRAM_LITERAL_NAMED_MEMBER_NODE },
+				func(self *Parser, gramBase *GramBase) {
+					fieldName := GramTokenString(GramFind(gramBase, GRAM_TOKEN_NAME))
+					gramBase.name = fieldName
 				},
-				Capture { []interface {} {
-					GRAM_TOKEN_NAME,
-					GRAM_TOKEN_COLON,
-					MatchWS,
-					MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
-					MatchWS,
-				}, GRAM_LITERAL_NAMED_MEMBER },
-			}}, GRAM_LITERAL_NAMED_MEMBER_NODE },
+			},
 			Capture { MatchAny { []interface {} {
 				[]interface {} {
 					Capture { []interface {} {
@@ -989,7 +1140,7 @@ func CaptureFuncArg(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
 	return parseGrams(self, grams, start, MatchMaybe {
-		Capture { MatchAny { []interface {} {
+		MatchAny { []interface {} {
 			[]interface {} {
 				Capture { []interface {} {
 					GRAM_TOKEN_NAME,
@@ -1012,7 +1163,7 @@ func CaptureFuncArg(self *Parser, grams *list.List, start *list.Element) (
 				MatchAny { []interface {} { CaptureType, GRAM_TYPE }},
 				MatchWS,
 			}, GRAM_FUNC_ARG },
-		}}, GRAM_FUNC_ARG_NODE },
+		}},
 	})
 }
 
@@ -1023,8 +1174,9 @@ func CaptureFunc(self *Parser, grams *list.List, start *list.Element) (
 		GRAM_TOKEN_FUNC, GRAM_TOKEN_WS,
 		MatchMaybe { Capture { []interface {} {
 			GRAM_TOKEN_PARAN_BEGIN, MatchLines,
-			GRAM_TOKEN_NAME, CaptureType, MatchLines,
-			GRAM_TOKEN_PARAN_END, MatchLines,
+			GRAM_TOKEN_NAME, MatchLines,
+			CaptureType, MatchLines,
+			GRAM_TOKEN_PARAN_END, MatchWS,
 		}, GRAM_FUNC_RECEIVER }},
 		GRAM_TOKEN_NAME, MatchWS,
 		GRAM_TOKEN_PARAN_BEGIN, MatchLines,
@@ -1040,15 +1192,53 @@ func CaptureFunc(self *Parser, grams *list.List, start *list.Element) (
 	}, GRAM_FUNC })
 }
 
-func CaptureModule(self *Parser, grams *list.List, start *list.Element) (
+func CaptureDefineType(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchThen {
+		Capture { []interface {} {
+			GRAM_TOKEN_TYPE, GRAM_TOKEN_WS,
+			GRAM_TOKEN_NAME, GRAM_TOKEN_WS,
+			CaptureType,
+		}, GRAM_DEFINE_TYPE },
+		func(self *Parser, gramDefineType *GramBase) {
+			typeName := GramTokenString(GramFind(gramDefineType, GRAM_TOKEN_NAME))
+			fmt.Print("define type ", typeName, "\n")
+			gramDefineType.name = typeName
+		},
+	})
+	// )
+}
+
+func CapturePackageId(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
 	return parseGrams(self, grams, start, Capture { []interface {} {
+		GRAM_TOKEN_PACKAGE, GRAM_TOKEN_WS, GRAM_TOKEN_NAME,
+	}, GRAM_PACKAGE_ID })
+}
+
+func CaptureModule(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchThen { Capture { []interface {} {
+		MatchLines,
+		CapturePackageId,
 		MatchLines,
 		MatchAnyTimes { MatchAny { []interface {} {
+			[]interface {} { CaptureDefineType, RequireLines },
 			[]interface {} { CaptureFunc, RequireLines },
 		}}},
-	}, GRAM_MODULE })
+	}, GRAM_MODULE }, func(self *Parser, grams *list.List, start *list.Element) (
+		*list.Element, bool,
+	) {
+		if gramModule, ok := start.Value.(*GramBase); ok {
+			packageId := GramFind(gramModule, GRAM_PACKAGE_ID)
+			packageName := GramTokenString(GramFind(packageId, GRAM_TOKEN_NAME))
+			gramModule.name = packageName
+		}
+		return start.Next(), true
+	}})
 }
 
 func captureGrams(
