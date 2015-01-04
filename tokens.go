@@ -23,7 +23,11 @@ const (
 	TOKEN_PLUS
 	TOKEN_MINUS
 	TOKEN_ASTERICK
-	TOKEN_DIVIDE
+	TOKEN_SLASH
+	TOKEN_AMPERSAND
+	TOKEN_PIPE
+	TOKEN_TILDE
+	TOKEN_EXCLAMATION
 	TOKEN_EQUAL
 	TOKEN_LT
 	TOKEN_GT
@@ -32,12 +36,14 @@ const (
 	TOKEN_DOT
 	TOKEN_COMMA
 	TOKEN_COLON
+	TOKEN_SEMICOLON
 	TOKEN_PARAN_BEGIN
 	TOKEN_PARAN_END
 	TOKEN_CURLY_BEGIN
 	TOKEN_CURLY_END
 	TOKEN_SQUARE_BEGIN
 	TOKEN_SQUARE_END
+	TOKEN_VAR
 	TOKEN_FUNC
 	TOKEN_TYPE
 	TOKEN_OBJECT
@@ -278,7 +284,15 @@ func (self *Lexer) ParseToken() Token {
 		return token
 	} else if self.matchChar(&token, '*', TOKEN_ASTERICK) {
 		return token
-	} else if self.matchChar(&token, '/', TOKEN_DIVIDE) {
+	} else if self.matchChar(&token, '/', TOKEN_SLASH) {
+		return token
+	} else if self.matchChar(&token, '&', TOKEN_AMPERSAND) {
+		return token
+	} else if self.matchChar(&token, '|', TOKEN_PIPE) {
+		return token
+	} else if self.matchChar(&token, '~', TOKEN_TILDE) {
+		return token
+	} else if self.matchChar(&token, '!', TOKEN_EXCLAMATION) {
 		return token
 	} else if self.matchChar(&token, '=', TOKEN_EQUAL) {
 		return token
@@ -296,6 +310,8 @@ func (self *Lexer) ParseToken() Token {
 		return token
 	} else if self.matchChar(&token, ':', TOKEN_COLON) {
 		return token
+	} else if self.matchChar(&token, ';', TOKEN_SEMICOLON) {
+		return token
 	} else if self.matchChar(&token, '{', TOKEN_CURLY_BEGIN) {
 		return token
 	} else if self.matchChar(&token, '}', TOKEN_CURLY_END) {
@@ -308,6 +324,8 @@ func (self *Lexer) ParseToken() Token {
 		return token
 	} else if self.matchChar(&token, ']', TOKEN_SQUARE_END) {
 		return token
+	} else if self.matchWord(&token, "var", TOKEN_VAR) {
+		return token
 	} else if self.matchWord(&token, "func", TOKEN_FUNC) {
 		return token
 	} else if self.matchWord(&token, "type", TOKEN_TYPE) {
@@ -316,7 +334,7 @@ func (self *Lexer) ParseToken() Token {
 		return token
 	} else if self.matchWord(&token, "interface", TOKEN_INTERFACE) {
 		return token
-	} else if self.matchWord(&token, "loop", TOKEN_LOOP) {
+	} else if self.matchWord(&token, "for", TOKEN_LOOP) {
 		return token
 	} else if self.matchWord(&token, "break", TOKEN_BREAK) {
 		return token

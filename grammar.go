@@ -131,7 +131,11 @@ const (
 	GRAM_TOKEN_PLUS
 	GRAM_TOKEN_MINUS
 	GRAM_TOKEN_ASTERICK
-	GRAM_TOKEN_DIVIDE
+	GRAM_TOKEN_SLASH
+	GRAM_TOKEN_AMPERSAND
+	GRAM_TOKEN_PIPE
+	GRAM_TOKEN_TILDE
+	GRAM_TOKEN_EXCLAMATION
 	GRAM_TOKEN_EQUAL
 	GRAM_TOKEN_LT
 	GRAM_TOKEN_GT
@@ -140,12 +144,14 @@ const (
 	GRAM_TOKEN_DOT
 	GRAM_TOKEN_COMMA
 	GRAM_TOKEN_COLON
+	GRAM_TOKEN_SEMICOLON
 	GRAM_TOKEN_PARAN_BEGIN
 	GRAM_TOKEN_PARAN_END
 	GRAM_TOKEN_CURLY_BEGIN
 	GRAM_TOKEN_CURLY_END
 	GRAM_TOKEN_SQUARE_BEGIN
 	GRAM_TOKEN_SQUARE_END
+	GRAM_TOKEN_VAR
 	GRAM_TOKEN_FUNC
 	GRAM_TOKEN_TYPE
 	GRAM_TOKEN_OBJECT
@@ -180,9 +186,25 @@ const (
 	GRAM_LITERAL_NAMED_MEMBER_NODE
 	GRAM_LITERAL_OBJECT
 	GRAM_LITERAL
+	GRAM_OPERAND
+	GRAM_OP_LOGICAL_OR
+	GRAM_OP_ADD
+	GRAM_OP_MUL
+	GRAM_OP_UNARY
 	GRAM_EXPR
-	GRAM_ASSIGN
+	GRAM_LHS
+	GRAM_DEREFERENCE
+	GRAM_DECLARE_VARIABLE
+	GRAM_AUTO_ASSIGNMENT
+	GRAM_ASSIGNMENT
 	GRAM_RETURN
+	GRAM_CALL_ARG
+	GRAM_CALL_ARG_NODE
+	GRAM_CALL
+	GRAM_CAST
+	GRAM_BRANCH_ELSE
+	GRAM_BRANCH
+	GRAM_LOOP
 	GRAM_STATEMENT
 	GRAM_FUNC_RECEIVER
 	GRAM_FUNC_ARG
@@ -729,14 +751,6 @@ func newMatcher(target interface {}) Matcher {
 // 	CaptureLiteral,
 // }}, GRAM_EXPR })
 
-func CaptureExpr(self *Parser, grams *list.List, start *list.Element) (
-	*list.Element, bool,
-) {
-	return parseGrams(self, grams, start, Capture { MatchAny { []interface {} {
-		CaptureLiteral,
-	}}, GRAM_EXPR })
-}
-
 func MatchLines(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
@@ -777,7 +791,7 @@ func CaptureLiteralMember(self *Parser, grams *list.List, start *list.Element) (
 							GRAM_TOKEN_NAME,
 							GRAM_TOKEN_COLON,
 							MatchWS,
-							CaptureExpr,
+							CaptureTopOp,
 							GRAM_TOKEN_COMMA,
 							MatchLines,
 						}, GRAM_LITERAL_NAMED_MEMBER },
@@ -787,7 +801,7 @@ func CaptureLiteralMember(self *Parser, grams *list.List, start *list.Element) (
 						GRAM_TOKEN_NAME,
 						GRAM_TOKEN_COLON,
 						MatchWS,
-						MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
+						CaptureTopOp,
 						MatchWS,
 					}, GRAM_LITERAL_NAMED_MEMBER },
 				}}, GRAM_LITERAL_NAMED_MEMBER_NODE },
@@ -799,14 +813,14 @@ func CaptureLiteralMember(self *Parser, grams *list.List, start *list.Element) (
 			Capture { MatchAny { []interface {} {
 				[]interface {} {
 					Capture { []interface {} {
-						CaptureExpr,
+						CaptureTopOp,
 						GRAM_TOKEN_COMMA,
 						MatchLines,
 					}, GRAM_LITERAL_MEMBER },
 					CaptureLiteralMember,
 				},
 				Capture { []interface {} {
-					MatchAny { []interface {} { CaptureExpr, GRAM_EXPR }},
+					CaptureTopOp,
 					MatchWS,
 				}, GRAM_LITERAL_MEMBER },
 			}}, GRAM_LITERAL_MEMBER_NODE },
@@ -1089,6 +1103,17 @@ func CaptureLiteralType(self *Parser, grams *list.List, start *list.Element) (
 	}}, GRAM_TYPE })
 }
 
+func CaptureSimpleLiteral(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { MatchAny { []interface {} {
+		GRAM_TOKEN_INT,
+		GRAM_TOKEN_REAL,
+		GRAM_TOKEN_CHAR,
+		GRAM_TOKEN_STRING,
+	}}, GRAM_LITERAL })
+}
+
 func CaptureLiteral(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
@@ -1104,35 +1129,446 @@ func CaptureLiteral(self *Parser, grams *list.List, start *list.Element) (
 			MatchLines, CaptureLiteralMember,
 			GRAM_TOKEN_CURLY_END,
 		}, GRAM_LITERAL_OBJECT }},
-		Capture { []interface {} {
-			GRAM_TOKEN_CURLY_BEGIN,
-			MatchLines, CaptureLiteralMember,
-			GRAM_TOKEN_CURLY_END,
-		}, GRAM_LITERAL_OBJECT },
+		// Capture { []interface {} {
+		// 	GRAM_TOKEN_CURLY_BEGIN,
+		// 	MatchLines, CaptureLiteralMember,
+		// 	GRAM_TOKEN_CURLY_END,
+		// }, GRAM_LITERAL_OBJECT },
 	}}, GRAM_LITERAL })
 }
 
 func CaptureReturn(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		GRAM_RETURN,
+		Capture { []interface {} {
+			GRAM_TOKEN_RETURN,
+			MatchMaybe { MatchAny { []interface {} {
+				[]interface {} { GRAM_TOKEN_WS, CaptureTopOp },
+			}}},
+		}, GRAM_RETURN },
+	}})
+}
+
+func CaptureSimpleExpr(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		GRAM_EXPR,
+		Capture { MatchAny { []interface {} {
+			CaptureSimpleLiteral,
+			CaptureParansExpr,
+			GRAM_TOKEN_NAME,
+			// GRAM_DEREFERENCE,
+			// CaptureDereference,
+		}}, GRAM_EXPR },
+	}})
+}
+
+func CaptureExpr(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		GRAM_EXPR,
+		Capture { MatchAny { []interface {} {
+			CaptureLiteral,
+			CaptureParansExpr,
+			GRAM_TOKEN_NAME,
+			// GRAM_DEREFERENCE,
+			// CaptureDereference,
+		}}, GRAM_EXPR },
+	}})
+}
+
+func CaptureParansExpr(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, []interface {} {
+		GRAM_TOKEN_PARAN_BEGIN, MatchWS,
+		CaptureTopOp, MatchWS,
+		GRAM_TOKEN_PARAN_END,
+	})
+}
+
+// var name type
+func CaptureDeclare(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
 	return parseGrams(self, grams, start, Capture { []interface {} {
-		GRAM_TOKEN_RETURN,
-		MatchMaybe { MatchAny { []interface {} {
-			[]interface {} { GRAM_TOKEN_WS, CaptureExpr },
-		}}},
-	}, GRAM_RETURN })
+		GRAM_TOKEN_VAR, GRAM_TOKEN_WS, GRAM_TOKEN_NAME, GRAM_TOKEN_WS, CaptureType,
+	}, GRAM_DECLARE_VARIABLE })
+}
+
+// name := expr
+func CaptureAutoAssignment(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		GRAM_TOKEN_NAME, MatchWS,
+		GRAM_TOKEN_COLON, GRAM_TOKEN_EQUAL, MatchWS,
+		CaptureTopOp,
+	}, GRAM_AUTO_ASSIGNMENT })
+}
+
+// declare
+// dereference
+func CaptureLHS(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		[]interface {} {
+			GRAM_TOKEN_ASTERICK,
+			CaptureLHS,
+		},
+		MatchThen {
+			GRAM_TOKEN_NAME,
+			MatchAny { []interface {} {
+				MatchThen {
+					[]interface {} {
+						GRAM_TOKEN_NAME,
+						MatchAny { []interface {} {
+							GRAM_TOKEN_DOT, GRAM_TOKEN_PARAN_BEGIN,
+						}},
+					},
+					CaptureDereference,
+				},
+				GRAM_TOKEN_NAME,
+			}},
+		},
+		CaptureDereference,
+		GRAM_EXPR,
+	}})
+}
+
+// lhs = expr
+// lhs += expr
+// lhs -= expr
+// lhs *= expr
+// lhs /= expr
+func CaptureAssignment(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		Capture { []interface {} {
+			CaptureLHS, MatchWS,
+			MatchMaybe { MatchAny { []interface {} {
+				GRAM_TOKEN_PLUS,
+				GRAM_TOKEN_MINUS,
+				GRAM_TOKEN_ASTERICK,
+				GRAM_TOKEN_SLASH,
+			}}},
+			GRAM_TOKEN_EQUAL,
+		}, GRAM_LHS },
+		MatchWS,
+		CaptureTopOp,
+	}, GRAM_ASSIGNMENT })
+}
+
+// expr[expr]
+// expr.name
+func CaptureDereference(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		MatchThen {
+			Capture { MatchAny { []interface {} {
+				[]interface {} {
+					CaptureSimpleExpr, GRAM_TOKEN_DOT, GRAM_TOKEN_NAME,
+				},
+				[]interface {} {
+					CaptureSimpleExpr, GRAM_TOKEN_SQUARE_BEGIN,
+					CaptureLogicalOrOp, GRAM_TOKEN_SQUARE_END,
+				},
+				[]interface {} {
+					GRAM_DEREFERENCE, GRAM_TOKEN_DOT, GRAM_TOKEN_NAME,
+				},
+				[]interface {} {
+					GRAM_DEREFERENCE, GRAM_TOKEN_SQUARE_BEGIN,
+					CaptureLogicalOrOp, GRAM_TOKEN_SQUARE_END,
+				},
+			}}, GRAM_DEREFERENCE },
+			CaptureDereference,
+		},
+		MatchThen {
+			[]interface {} { MatchAny { []interface {} {
+				CaptureSimpleExpr, GRAM_DEREFERENCE,
+			}}, GRAM_TOKEN_PARAN_BEGIN },
+			MatchThen {
+				Capture { []interface {} {
+					CaptureCall,
+					MatchAny { []interface {} {
+						[]interface {} { GRAM_TOKEN_DOT, GRAM_TOKEN_NAME },
+						[]interface {} {
+							GRAM_TOKEN_SQUARE_BEGIN,
+							CaptureLogicalOrOp, GRAM_TOKEN_SQUARE_END,
+						},
+					}},
+				}, GRAM_DEREFERENCE },
+				CaptureDereference,
+			},
+		},
+		GRAM_DEREFERENCE,
+	}})
+}
+
+func captureOp(
+	self *Parser, grams *list.List, start *list.Element,
+	opCode, nextOpCode GramCode,
+	nextOp interface {},
+	matchOperand []interface {},
+) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		Capture { []interface {} {
+			nextOp, MatchWS,
+			Capture { MatchAny { matchOperand }, GRAM_OPERAND }, MatchWS,
+			nextOp,
+		}, opCode },
+		nextOp,
+		nextOpCode,
+	}})
+}
+
+func MatchAnyOp(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		GRAM_OP_LOGICAL_OR,
+		GRAM_OP_ADD,
+		GRAM_OP_MUL,
+		GRAM_OP_UNARY,
+		GRAM_DEREFERENCE,
+		GRAM_EXPR,
+		GRAM_CALL,
+	}})
+}
+
+func CaptureTopOp(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		CaptureLogicalOrOp, CaptureLiteral,
+	}})
+}
+
+// expr || expr
+func CaptureLogicalOrOp(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return captureOp(
+		self, grams, start,
+		GRAM_OP_LOGICAL_OR, GRAM_OP_ADD, CaptureAddOp,
+		[]interface {} { []interface {} { GRAM_TOKEN_PIPE, GRAM_TOKEN_PIPE }},
+	)
+}
+
+// expr + expr
+// expr - expr
+func CaptureAddOp(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return captureOp(
+		self, grams, start,
+		GRAM_OP_ADD, GRAM_OP_MUL, CaptureMulOp,
+		[]interface {} { GRAM_TOKEN_PLUS, GRAM_TOKEN_MINUS },
+	)
+}
+
+// expr * expr
+// expr / expr
+func CaptureMulOp(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return captureOp(
+		self, grams, start,
+		GRAM_OP_MUL, GRAM_OP_UNARY, CaptureUnaryOp,
+		[]interface {} { GRAM_TOKEN_ASTERICK, GRAM_TOKEN_SLASH },
+	)
+}
+
+func CaptureUnaryOp(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		CaptureCall,
+		CaptureDereference,
+		Capture { []interface {} {
+			Capture { MatchAny { []interface {} {
+				GRAM_TOKEN_AMPERSAND,
+				GRAM_TOKEN_ASTERICK,
+				GRAM_TOKEN_PLUS,
+				GRAM_TOKEN_MINUS,
+				GRAM_TOKEN_TILDE,
+				GRAM_TOKEN_EXCLAMATION,
+			}}, GRAM_OPERAND }, MatchWS,
+			CaptureUnaryOp,
+		}, GRAM_OP_UNARY },
+		CaptureExpr,
+	}})
+}
+
+func CaptureCallArg(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchMaybe { Capture { []interface {} {
+		Capture { CaptureLogicalOrOp, GRAM_CALL_ARG },
+		MatchAny { []interface {} {
+			[]interface {} {
+				GRAM_TOKEN_COMMA,
+				MatchLines,
+				CaptureCallArg,
+			},
+			MatchWS,
+		}},
+	}, GRAM_CALL_ARG_NODE }})
+}
+
+// unary ( args )
+func CaptureCall(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		MatchThen {
+			Capture { []interface {} {
+				MatchAny { []interface {} {
+					GRAM_DEREFERENCE, GRAM_EXPR, CaptureDereference, CaptureExpr,
+				}},
+				GRAM_TOKEN_PARAN_BEGIN,
+				MatchLines,
+				CaptureCallArg,
+				GRAM_TOKEN_PARAN_END,
+			}, GRAM_CALL },
+			CaptureCall,
+		},
+		GRAM_CALL,
+	}})
+}
+
+// dereference.(type)
+func CaptureCast(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, Capture { []interface {} {
+		CaptureDereference,
+		GRAM_TOKEN_DOT,
+		GRAM_TOKEN_PARAN_BEGIN,
+		MatchLines,
+		CaptureType,
+		MatchLines,
+		GRAM_TOKEN_PARAN_END,
+	}, GRAM_CAST })
+}
+
+// if expr { statements }
+// if statement; expr { statements }
+// branch else branch
+// branch else { statements }
+func CaptureBranch(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		GRAM_BRANCH,
+		Capture { []interface {} {
+			GRAM_TOKEN_IF, MatchLines,
+			MatchAny { []interface {} {
+				[]interface {} {
+					MatchMaybe { MatchAny { []interface {} {
+						CaptureAutoAssignment, CaptureAssignment,
+					}}},
+					GRAM_TOKEN_SEMICOLON, MatchLines, CaptureLogicalOrOp,
+				},
+				CaptureLogicalOrOp,
+			}},
+			MatchLines,
+			CaptureBlock,
+			MatchMaybe { MatchAny { []interface {} {
+				Capture { []interface {} {
+					MatchLines,
+					GRAM_TOKEN_ELSE,
+					MatchLines,
+					CaptureBlock,
+				}, GRAM_BRANCH_ELSE },
+				[]interface {} {
+					MatchLines,
+					GRAM_TOKEN_ELSE,
+					MatchLines,
+					CaptureBranch,
+				},
+			}}},
+		}, GRAM_BRANCH },
+	}})
+}
+
+// for expr { statements }
+// for statement; expr; statement { statements }
+func CaptureLoop(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, MatchAny { []interface {} {
+		GRAM_LOOP,
+		Capture { []interface {} {
+			GRAM_TOKEN_LOOP, MatchLines,
+			MatchAny { []interface {} {
+				[]interface {} {
+					MatchMaybe { MatchAny { []interface {} {
+						CaptureAutoAssignment, CaptureAssignment,
+					}}},
+					GRAM_TOKEN_SEMICOLON, MatchLines,
+					CaptureLogicalOrOp, GRAM_TOKEN_SEMICOLON, MatchLines,
+					MatchMaybe { MatchAny { []interface {} {
+						CaptureAutoAssignment, CaptureAssignment,
+					}}},
+				},
+				CaptureLogicalOrOp,
+			}},
+			MatchLines,
+			CaptureBlock,
+		}, GRAM_LOOP },
+	}})
+}
+
+func CaptureBlock(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start, []interface {} {
+		GRAM_TOKEN_CURLY_BEGIN,
+		MatchLines,
+		CaptureStatements,
+		GRAM_TOKEN_CURLY_END,
+	})
 }
 
 func CaptureStatements(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
-	return parseGrams(self, grams, start, MatchAnyTimes {
-		Capture { []interface {} {
+	return parseGrams(self, grams, start, []interface {} {
+		MatchAnyTimes { MatchAny { []interface {} {
+			GRAM_STATEMENT,
+			Capture { []interface {} {
+				MatchAny { []interface {} {
+					CaptureReturn,
+					CaptureBranch,
+					CaptureLoop,
+					CaptureAutoAssignment,
+					CaptureAssignment,
+					CaptureCall,
+				}},
+				RequireLines,
+			}, GRAM_STATEMENT },
+		}}},
+		MatchMaybe { Capture { []interface {} {
 			MatchAny { []interface {} {
 				CaptureReturn,
+				CaptureBranch,
+				CaptureLoop,
+				CaptureAutoAssignment,
+				CaptureAssignment,
+				CaptureCall,
 			}},
-			RequireLines,
-		}, GRAM_STATEMENT },
+			MatchWS,
+		}, GRAM_STATEMENT }},
 	})
 }
 

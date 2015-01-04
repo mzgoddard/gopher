@@ -43,7 +43,7 @@ func TestMatchGrammar(t *testing.T) {
 	testLiteral("123")
 	testLiteral("\"abc\"")
 	testLiteral("input{}")
-	testLiteral("{}")
+	// testLiteral("{}")
 	testLiteral("input {}")
 	testLiteral("input { }")
 
@@ -80,14 +80,90 @@ func TestMatchGrammar(t *testing.T) {
 	testLiteral("input { 1,\n 2,\n }")
 	dontCapture(t, "input { 1,\n 2\n }", "literal", CaptureLiteral)
 
-	testLiteral("{ 1, 2 }")
-	testLiteral("{ 1, 2, }")
+	// testLiteral("{ 1, 2 }")
+	// testLiteral("{ 1, 2, }")
 
 	testCapture(t, "a:1", "custom", []interface {} {
 		GRAM_TOKEN_NAME, GRAM_TOKEN_COLON, GRAM_TOKEN_INT,
 	})
 	testLiteral("input { a: 1, b: 2 }")
 	testLiteral("input { a: 1, b: 2, }")
+
+	confirmLogicalOr := confirmFactory(t, "logical or",
+		CaptureLogicalOrOp, []interface {} {
+			MatchAnyOp, GRAM_TOKEN_EOF,
+		},
+	)
+	confirmLogicalOr("1")
+	confirmLogicalOr("1 || 1")
+	confirmLogicalOr("1 + 1")
+	confirmLogicalOr("1 - 1")
+	confirmLogicalOr("1 * 1")
+	confirmLogicalOr("1 / 1")
+	confirmLogicalOr("(1)")
+	confirmLogicalOr("(1 + 1)")
+	confirmLogicalOr("a")
+	confirmLogicalOr("a + b")
+	confirmLogicalOr("a.b")
+	confirmLogicalOr("a.b + c.d")
+	confirmLogicalOr("a.b.c")
+	confirmLogicalOr("a.b.c + d.e.f")
+	confirmLogicalOr("a[b]")
+	confirmLogicalOr("a[0]")
+	confirmLogicalOr("a.b[c]")
+
+	confirmCall := confirmFactory(t, "call", CaptureCall, []interface {} {
+		GRAM_CALL, GRAM_TOKEN_EOF,
+	})
+	confirmCall("a()")
+	confirmCall("a.b()")
+	confirmCall("a().b()")
+	confirmCall("a[b]()")
+	confirmCall("a.b[c]()")
+	confirmCall("a()[0]()")
+	confirmLogicalOr("a()")
+	confirmLogicalOr("a.b()")
+	confirmLogicalOr("a().b()")
+	confirmLogicalOr("a().b()[0]")
+	confirmLogicalOr("a().b().c")
+
+	confirmBlock := confirmFactory(t, "block", CaptureBlock, []interface {} {
+		CaptureBlock, GRAM_TOKEN_EOF,
+	})
+	confirmBlock("{}")
+	confirmBlock("{\n}")
+	confirmBlock("{a()}")
+	confirmBlock("{\na()\n}")
+
+	confirmBranch := confirmFactory(t, "branch", CaptureBranch, []interface {} {
+		GRAM_BRANCH, GRAM_TOKEN_EOF,
+	})
+	confirmBranch("if a {}")
+	confirmBranch("if a {\n}")
+	confirmBranch("if a {\n}")
+	confirmBranch("if a = true; a {}")
+	confirmBranch("if a := true; a {}")
+
+	confirmCustom := confirmFactory(t, "custom", MatchThen {
+		CaptureLogicalOrOp, CaptureLHS,
+	}, CaptureLHS)
+	confirmCustom("a = true")
+
+	confirmLHS := confirmFactory(t, "lhs", CaptureLHS, []interface {} {
+		CaptureLHS, GRAM_TOKEN_EOF,
+	})
+	confirmLHS("arg")
+	confirmLHS("a.b")
+	confirmLHS("*beta")
+
+	confirmAssign := confirmFactory(t, "assignment",
+		CaptureAssignment, []interface {} {
+			GRAM_ASSIGNMENT, GRAM_TOKEN_EOF,
+		},
+	)
+	confirmAssign("a = 0")
+	confirmAssign("a = true")
+	confirmAssign("a.b = false")
 
 	confirmFuncReturn := confirmFactory(t, "func return",
 		CaptureReturn, []interface {} {
