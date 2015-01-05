@@ -405,6 +405,10 @@ func (self Token) String() string {
 	return self.source[self.index:self.index + self.length]
 }
 
+func (self Token) CodeName() string {
+	return self.code.Name()
+}
+
 func (self TokenCode) Name() string {
 	if self == TOKEN_WS {
 		return "WS"

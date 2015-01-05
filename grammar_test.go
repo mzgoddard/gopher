@@ -172,6 +172,7 @@ func TestMatchGrammar(t *testing.T) {
 	)
 	confirmFuncReturn("return")
 	confirmFuncReturn("return 0")
+	confirmFuncReturn("return Vec2 { 0, 0 }")
 
 	confirmFunc := confirmFactory(t, "func", CaptureFunc, []interface {} {
 		GRAM_FUNC, GRAM_TOKEN_EOF,

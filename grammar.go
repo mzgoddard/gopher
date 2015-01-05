@@ -21,10 +21,12 @@ type Library struct {}
 type Parser struct {
 	library *Library
 	module Gram
+	filePath string
 	source string
 	lexer *Lexer
 	tokens *list.List
 	grams *list.List
+	errors *list.List
 }
 
 type GramBase struct {
@@ -229,6 +231,10 @@ func GramModule(self Gram) Gram {
 	} else {
 		return GramIterParents(self).Filter(GRAM_MODULE).First()
 	}
+}
+
+func GramDefineType(self, typeGram Gram) Gram {
+	return nil
 }
 
 func GramIterModules(self Gram) GramIter {
@@ -471,8 +477,78 @@ func NewParser(source string) *Parser {
 
 func NewDefaultParser() *Parser {
 	parser := new(Parser)
-	*parser = Parser {}
+	*parser = Parser {
+		errors: list.New(),
+	}
 	return parser
+}
+
+type SyntaxError struct {
+	parser *Parser
+	message string
+	gram Gram
+}
+
+func FindToken(gram Gram) *Token {
+	var token Gram = nil
+	if gramToken, ok := gram.(*GramToken); ok {
+		token = gramToken
+	}
+	if token == nil {
+		token = NewGramWalk(gram).FilterFunc(func(gram Gram) bool {
+			if _, ok := gram.(*GramToken); ok {
+				return true
+			}
+			return false
+		}).First()
+	}
+	if gramToken, ok := token.(*GramToken); ok {
+		return gramToken.token
+	}
+	return nil
+}
+
+func (self SyntaxError) token() *Token {
+	return FindToken(self.gram)
+}
+
+func (self SyntaxError) Line() int {
+	if token := self.token(); token != nil {
+		return token.line + 1
+	}
+	return -1
+}
+
+func (self SyntaxError) Column() int {
+	if token := self.token(); token != nil {
+		return token.column + 1
+	}
+	return -1
+}
+
+func (self SyntaxError) FilePath() string {
+	module := GramIterParents(self.gram).Filter(GRAM_MODULE).First()
+	if moduleBase, ok := module.(*GramBase); ok {
+		return moduleBase.filePath
+	}
+	return self.parser.filePath
+}
+
+func (self SyntaxError) String() string {
+	return fmt.Sprintf(
+		"%s %d %d: %s\n",
+		self.FilePath(), self.Line(), self.Column(), self.message,
+	)
+}
+
+func (self *Parser) error(msg string, gram Gram) {
+	e := new(SyntaxError)
+	*e = SyntaxError {
+		parser: self,
+		message: msg,
+		gram: gram,
+	}
+	self.errors.PushBack(e)
 }
 
 func (self *Library) AddFile(path string) {}
@@ -585,6 +661,14 @@ type MatchThen struct {
 	then interface {}
 }
 
+type MatchExpect struct {
+	target, response interface {}
+}
+
+type MatchRequire struct {
+	target, response interface {}
+}
+
 type Matcher interface {
 	parse(*Parser, *list.List, *list.Element) (*list.Element, bool)
 }
@@ -688,6 +772,50 @@ func _parseGrams(
 					e = nextE
 				} else {
 					break
+				}
+			} else if match, ok := target[i].(MatchExpect); ok {
+				if nextE, ok := parseGrams(self, grams, e, match.target); !ok {
+					responsePrefix := "Expected something different then: "
+					if prefix, ok := match.response.(string); ok {
+						responsePrefix = prefix
+					}
+
+					if gram, ok := nextE.Value.(Gram); ok {
+						token := FindToken(gram)
+						fullReponse := fmt.Sprintf(
+							"%s%s(\"%s\")",
+							responsePrefix, token.CodeName(), token.String(),
+						)
+						self.error(fullReponse, gram)
+					} else {
+						self.error(responsePrefix + "Unable to decode gram", nil)
+					}
+					break
+				} else {
+					i++
+				}
+			} else if match, ok := target[i].(MatchRequire); ok {
+				nextE, ok := parseGrams(self, grams, e, match.target)
+				if !ok {
+					responsePrefix := "Required something different then: "
+					if prefix, ok := match.response.(string); ok {
+						responsePrefix = prefix
+					}
+
+					if gram, ok := nextE.Value.(Gram); ok {
+						token := FindToken(gram)
+						fullReponse := fmt.Sprintf(
+							"%s%s(\"%s\")",
+							responsePrefix, token.CodeName(), token.String(),
+						)
+						self.error(fullReponse, gram)
+					} else {
+						self.error(responsePrefix + "Unable to decode gram", nil)
+					}
+					break
+				} else {
+					e = nextE
+					i++
 				}
 			} else {
 				fmt.Printf("Unable to recognize target %d %s\n", i, target[i])
@@ -1114,6 +1242,20 @@ func CaptureSimpleLiteral(self *Parser, grams *list.List, start *list.Element) (
 	}}, GRAM_LITERAL })
 }
 
+func CaptureObjectLiteral(self *Parser, grams *list.List, start *list.Element) (
+	*list.Element, bool,
+) {
+	return parseGrams(self, grams, start,
+		MatchThen { []interface {} {
+			MatchType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
+		}, Capture { []interface {} {
+			CaptureLiteralType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
+			MatchLines, CaptureLiteralMember,
+			GRAM_TOKEN_CURLY_END,
+		}, GRAM_LITERAL_OBJECT }},
+	)
+}
+
 func CaptureLiteral(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
@@ -1122,13 +1264,7 @@ func CaptureLiteral(self *Parser, grams *list.List, start *list.Element) (
 		GRAM_TOKEN_REAL,
 		GRAM_TOKEN_CHAR,
 		GRAM_TOKEN_STRING,
-		MatchThen { []interface {} {
-			MatchType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
-		}, Capture { []interface {} {
-			CaptureLiteralType, MatchWS, GRAM_TOKEN_CURLY_BEGIN,
-			MatchLines, CaptureLiteralMember,
-			GRAM_TOKEN_CURLY_END,
-		}, GRAM_LITERAL_OBJECT }},
+		CaptureObjectLiteral,
 		// Capture { []interface {} {
 		// 	GRAM_TOKEN_CURLY_BEGIN,
 		// 	MatchLines, CaptureLiteralMember,
@@ -1144,9 +1280,7 @@ func CaptureReturn(self *Parser, grams *list.List, start *list.Element) (
 		GRAM_RETURN,
 		Capture { []interface {} {
 			GRAM_TOKEN_RETURN,
-			MatchMaybe { MatchAny { []interface {} {
-				[]interface {} { GRAM_TOKEN_WS, CaptureTopOp },
-			}}},
+			MatchMaybe { []interface {} { GRAM_TOKEN_WS, CaptureTopOp }},
 		}, GRAM_RETURN },
 	}})
 }
@@ -1186,8 +1320,15 @@ func CaptureParansExpr(self *Parser, grams *list.List, start *list.Element) (
 ) {
 	return parseGrams(self, grams, start, []interface {} {
 		GRAM_TOKEN_PARAN_BEGIN, MatchWS,
-		CaptureTopOp, MatchWS,
-		GRAM_TOKEN_PARAN_END,
+		MatchRequire {
+			CaptureTopOp,
+			"Expected expression, found: ",
+		},
+		MatchWS,
+		MatchRequire {
+			GRAM_TOKEN_PARAN_END,
+			"Expected closing parantheses, found: ",
+		},
 	})
 }
 
@@ -1349,7 +1490,8 @@ func CaptureTopOp(self *Parser, grams *list.List, start *list.Element) (
 	*list.Element, bool,
 ) {
 	return parseGrams(self, grams, start, MatchAny { []interface {} {
-		CaptureLogicalOrOp, CaptureLiteral,
+		Capture { CaptureObjectLiteral, GRAM_LITERAL },
+		CaptureLogicalOrOp,
 	}})
 }
 
@@ -1536,7 +1678,7 @@ func CaptureBlock(self *Parser, grams *list.List, start *list.Element) (
 		GRAM_TOKEN_CURLY_BEGIN,
 		MatchLines,
 		CaptureStatements,
-		GRAM_TOKEN_CURLY_END,
+		MatchRequire { GRAM_TOKEN_CURLY_END, "Expected closing bracket, found: " },
 	})
 }
 
@@ -1610,21 +1752,30 @@ func CaptureFunc(self *Parser, grams *list.List, start *list.Element) (
 		GRAM_TOKEN_FUNC, GRAM_TOKEN_WS,
 		MatchMaybe { Capture { []interface {} {
 			GRAM_TOKEN_PARAN_BEGIN, MatchLines,
-			GRAM_TOKEN_NAME, MatchLines,
-			CaptureType, MatchLines,
-			GRAM_TOKEN_PARAN_END, MatchWS,
+			MatchRequire { []interface {} {
+				GRAM_TOKEN_NAME, MatchLines,
+				CaptureType, MatchLines,
+				GRAM_TOKEN_PARAN_END, MatchWS,
+			}, "Expected receiver for function, found: " },
 		}, GRAM_FUNC_RECEIVER }},
-		GRAM_TOKEN_NAME, MatchWS,
-		GRAM_TOKEN_PARAN_BEGIN, MatchLines,
+		MatchRequire { GRAM_TOKEN_NAME, "Expected name of function, found: " },
+		MatchWS,
+		MatchRequire {
+			GRAM_TOKEN_PARAN_BEGIN,
+			"Expected opening parantheses, found: ",
+		},
+		MatchLines,
 		CaptureFuncArg,
-		GRAM_TOKEN_PARAN_END, MatchWS,
+		MatchRequire {
+			GRAM_TOKEN_PARAN_END,
+			"Expected closing parantheses, found: ",
+		},
+		MatchWS,
 		MatchMaybe { []interface {} {
 			Capture { CaptureType, GRAM_FUNC_RETURN },
 			MatchWS,
 		}},
-		GRAM_TOKEN_CURLY_BEGIN, MatchLines,
-		CaptureStatements,
-		GRAM_TOKEN_CURLY_END,
+		MatchRequire { CaptureBlock, "Expected block for function, found: " },
 	}, GRAM_FUNC })
 }
 
@@ -1665,6 +1816,7 @@ func CaptureModule(self *Parser, grams *list.List, start *list.Element) (
 			[]interface {} { CaptureDefineType, RequireLines },
 			[]interface {} { CaptureFunc, RequireLines },
 		}}},
+		MatchExpect { GRAM_TOKEN_EOF, "Expected end of file, found: " },
 	}, GRAM_MODULE }, func(self *Parser, grams *list.List, start *list.Element) (
 		*list.Element, bool,
 	) {

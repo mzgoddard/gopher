@@ -34,11 +34,7 @@ func main() {
 					if cgen.errors.Len() > 0 {
 						for e := cgen.errors.Front(); e != nil; e = e.Next() {
 							if genError, ok := e.Value.(*GenError); ok {
-								fmt.Printf(
-									"%s %d %d: %s\n",
-									genError.FilePath(), genError.Line(), genError.Column(),
-									genError.message,
-								)
+								fmt.Print(genError.String())
 							}
 						}
 						return
@@ -50,6 +46,12 @@ func main() {
 				}
 			} else {
 				fmt.Printf("Unable to parse %s.\n", f)
+				parser.filePath = f
+				for e := parser.errors.Front(); e != nil; e = e.Next() {
+					if syntaxError, ok := e.Value.(*SyntaxError); ok {
+						fmt.Print(syntaxError.String())
+					}
+				}
 			}
 		}
 	}

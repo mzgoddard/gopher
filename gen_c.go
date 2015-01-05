@@ -311,6 +311,13 @@ func (self GenError) FilePath() string {
 	return ""
 }
 
+func (self GenError) String() string {
+	return fmt.Sprintf(
+		"%s %d %d: %s\n",
+		self.FilePath(), self.Line(), self.Column(), self.message,
+	)
+}
+
 func (self *Generator) addError(message string, gram Gram) {
 	e := new(GenError)
 	*e = GenError {
@@ -442,7 +449,7 @@ func (self *CGenerator) confirmType(parent *Gen, gram Gram) {
 			typeGen.PushToken("typedef").AddSpace()
 			self.genType(typeGen, GramFind(typedefGram, GRAM_TYPE))
 			structName := self.structNameFromGrams(
-				parent, GramSearch(gram, GRAM_TOKEN_NAME),
+				parent, gram,
 			)
 			typeGen.AddSpace().PushToken(structName)
 			typeGen.PushToken(";").AddLine().AddLine()
@@ -502,7 +509,7 @@ func (self *CGenerator) arrayTypeName(parent *Gen, gram Gram) string {
 		if subgram.Code() == GRAM_TOKEN_SQUARE_BEGIN {
 			s += "_array"
 		} else if subgram.Code() == GRAM_TOKEN_NAME {
-			s = self.structNameFromGrams(parent, subgram) + s
+			s = self.structNameFromGrams(parent, gram) + s
 		}
 	}
 	return s
@@ -514,11 +521,17 @@ func (self *CGenerator) genStructTypeMember(parent *Gen, gram Gram) {
 
 	typeGram := GramSearch(gram, GRAM_TYPE)
 
+	members := 0
 	for nameGram := range NewGramIter(gram).Filter(GRAM_TOKEN_NAME) {
+		members += 1
 		gen.AddIndent()
 		self.genType(gen, typeGram)
 		gen.AddSpace().PushToken(GramTokenString(nameGram)).PushToken(";")
 		gen.AddLine()
+	}
+
+	if members == 0 {
+		
 	}
 }
 
@@ -531,7 +544,7 @@ func (self *CGenerator) genStructType(parent *Gen, gram Gram) {
 	for member := range NewGramIter(gram).Filter(GRAM_OBJECT_MEMBER) {
 		self.genStructTypeMember(indent, member)
 	}
-	gen.PushToken("}")
+	gen.AddIndent().PushToken("}")
 }
 
 func (self *CGenerator) genType(parent *Gen, gram Gram) {
@@ -552,7 +565,7 @@ func (self *CGenerator) genType(parent *Gen, gram Gram) {
 				gen.PushToken("double")
 			} else {
 				self.confirmType(parent, gram)
-				gen.PushToken(self.structNameFromGrams(parent, subgram))
+				gen.PushToken(self.structNameFromGrams(parent, gram))
 			}
 		} else if subgram.Code() == GRAM_TOKEN_ASTERICK {
 			self.genType(gen, GramFind(gram, GRAM_TYPE))
@@ -639,11 +652,16 @@ func (self *CGenerator) genReturn(parent *Gen, gram Gram) {
 	parent.children.PushBack(gen)
 	gen.PushToken("return")
 
-	exprGram := GramFind(gram, GRAM_EXPR)
-	if exprGram != nil {
-		gen.AddSpace()
-		self.genExpr(gen, exprGram)
-	}
+	self.genFirst(gen, gram, GenTable {
+		GRAM_EXPR: func(parent *Gen, gram Gram) {
+			parent.AddSpace()
+			self.genExpr(parent, gram)
+		},
+		GRAM_LITERAL: func(parent *Gen, gram Gram) {
+			parent.AddSpace()
+			self.genLiteral(parent, gram)
+		},
+	})
 
 	gen.PushToken(";")
 }
@@ -742,7 +760,7 @@ func (self *CGenerator) confirmImplementations(parent *Gen, gram Gram) {
 	// check for cast function for type (pointer to instance, type to cast to)
 	packageName := GramTypeModuleName(gram)
 	typeName := GramTypeName(gram)
-	castFuncName := self.funcName("", typeName, "Cast")
+	castFuncName := self.funcName(packageName, typeName, "Cast")
 	prototypeZone := self.confirmPrototypeZone(parent)
 	typedefZone := parent.FindNamed(C_ZONE, "typedef")
 
@@ -848,7 +866,9 @@ func (self *CGenerator) confirmImplementations(parent *Gen, gram Gram) {
 		// check if implementation has been generated
 
 		// confirm interface table
-		interfaceTableName := self.structName(interfaceModuleName, interfaceName)
+		interfaceTableName := self.structName(
+			interfaceModuleName, interfaceName + "Table",
+		)
 		interfaceTable := typedefZone.FindNamed(C_TYPEDEF, interfaceTableName)
 		if interfaceTable == nil {
 			interfaceTable = typedefZone.NewGram(C_TYPEDEF, interfaceTableName, nil)
@@ -865,7 +885,7 @@ func (self *CGenerator) confirmImplementations(parent *Gen, gram Gram) {
 				memberName := GramTokenString(GramFind(
 					interfaceMember, GRAM_TOKEN_NAME,
 				))
-				line.T(" (*").T(memberName).T(")(")
+				line.T(" (*").T(memberName).T(")(void *, ")
 				firstArg := true
 				for arg := range NewGramWalk(interfaceMember).Filter(GRAM_FUNC_ARG) {
 					argType := GramFind(arg, GRAM_TYPE)
@@ -970,11 +990,20 @@ func (self *CGenerator) genMainFunc(parent *Gen, gram Gram) {
 }
 
 func (self *CGenerator) funcNameFromGrams(
-	parent *Gen, receiverGram Gram, nameGram Gram,
+	parent *Gen, receiverGram, nameGram Gram,
 ) string {
+	receiverType := NewGramWalk(receiverGram).Filter(GRAM_TYPE).Last()
+	moduleName := ""
+	if receiverType != nil {
+		moduleName = GramTypeModuleName(receiverType)
+	} else if nameGram.Parent() != nil {
+		moduleName = GramModuleName(nameGram)
+	}
+	fmt.Print(moduleName, GramTokenString(nameGram), "\n")
 	// TODO: Find package.
 	return self.funcName(
-		"",
+		moduleName,
+		// "",
 		GramTokenString(GramFind(
 			NewGramWalk(receiverGram).Filter(GRAM_TYPE).Last(),
 			GRAM_TOKEN_NAME,
@@ -1001,16 +1030,25 @@ func (self *CGenerator) funcName(
 }
 
 func (self *CGenerator) structNameFromGrams(parent *Gen, nameGram Gram) string {
-	// TODO: Find package.
+	moduleName := GramTypeModuleName(nameGram)
+	if moduleName == "" {
+		moduleName = GramModuleName(nameGram)
+	}
+	fmt.Print("structNameFromGrams ", moduleName, " ", GramTokenString(nameGram), "\n")
+
 	return self.structName(
-		"",
-		GramTokenString(nameGram),
+		GramTypeModuleName(nameGram),
+		GramTypeName(nameGram),
 	)
 }
 
 func (self *CGenerator) structName(prefix, name string) string {
 	// Use default package prefix.
 	if prefix == "" {
+		prefix = "PH"
+	}
+
+	if name == "string" {
 		prefix = "PH"
 	}
 
